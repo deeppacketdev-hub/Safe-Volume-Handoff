@@ -82,29 +82,47 @@ class DeviceDiscoveryService {
                 connectionType = .bluetooth
             case .airPlay:
                 let portNameLower = output.portName.lowercased()
-                deviceType = portNameLower.contains("tv") ? .tv : .speaker
+                if portNameLower.contains("mac") || portNameLower.contains("macbook") {
+                    deviceType = .mac
+                } else if portNameLower.contains("tv") {
+                    deviceType = .tv
+                } else {
+                    deviceType = .speaker
+                }
                 connectionType = .airplay
             default:
-                deviceType = .speaker
-                connectionType = .bluetooth
+                let portNameLower = output.portName.lowercased()
+                if portNameLower.contains("mac") || portNameLower.contains("macbook") {
+                    deviceType = .mac
+                    connectionType = .airplay
+                } else {
+                    deviceType = .speaker
+                    connectionType = .bluetooth
+                }
             }
             
-            let lastVol = SafeVolumeManager.shared.lastKnownVolume(for: output.uid) ?? AudioEngine.shared.volume
+            // Реальна апаратна гучність підключеного пристрою (Mac, AirPlay, Bluetooth або динамік)
+            let realHardwareVolume = AVAudioSession.sharedInstance().outputVolume
+            AudioEngine.shared.syncSystemVolume(realHardwareVolume)
+            
             currentDevice = AudioDevice(
                 id: output.uid,
                 name: output.portName,
                 type: deviceType,
                 connectionType: connectionType,
-                lastKnownVolume: lastVol,
+                lastKnownVolume: realHardwareVolume,
                 isConnected: true
             )
         } else {
+            let realHardwareVolume = AVAudioSession.sharedInstance().outputVolume
+            AudioEngine.shared.syncSystemVolume(realHardwareVolume)
+            
             currentDevice = AudioDevice(
                 id: "builtin-speaker",
                 name: "iPhone",
                 type: .iPhone,
                 connectionType: .builtIn,
-                lastKnownVolume: AudioEngine.shared.volume,
+                lastKnownVolume: realHardwareVolume,
                 isConnected: true
             )
         }
@@ -116,9 +134,24 @@ class DeviceDiscoveryService {
     private func handleAudioRouteChange(previousOutputId: String?) {
         updateCurrentRoute()
         
-        // Якщо маршрут змінився на новий пристрій — застосовуємо Safe Volume Handoff
+        // Отримуємо реальну актуальну гучність підключеного пристрою
+        let realHardwareVolume = AVAudioSession.sharedInstance().outputVolume
+        AudioEngine.shared.syncSystemVolume(realHardwareVolume)
+        
         if let current = currentDevice, current.id != previousOutputId {
-            applySafeVolumeHandoff(for: current)
+            let maxSafe = SafeVolumeManager.shared.config.effectiveMaxVolume
+            if realHardwareVolume > maxSafe {
+                // Захищаємо слух, якщо пристрій підключився на небезпечно високій гучності
+                applySafeVolumeHandoff(for: current)
+            } else {
+                // Фіксуємо поточну реальну гучність пристрою
+                SafeVolumeManager.shared.recordConnection(
+                    deviceId: current.id,
+                    deviceName: current.name,
+                    volume: realHardwareVolume
+                )
+                HapticFeedbackService.light()
+            }
         }
     }
     
@@ -154,56 +187,69 @@ class DeviceDiscoveryService {
     
     // MARK: - Real Known Devices from History
     
-    /// Повертає збережені реальні пристрої з історії підключень
+    /// Повертає збережені реальні пристрої з історії підключень без дублікатів
     var knownDevices: [AudioDevice] {
         let histories = SafeVolumeManager.shared.deviceHistories
+        var seenNames = Set<String>()
         var seenIds = Set<String>()
         var result: [AudioDevice] = []
+        
+        let currentNameNorm = currentDevice?.name.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        let currentId = currentDevice?.id ?? ""
         
         let sortedHistories = histories.sorted { $0.timestamp > $1.timestamp }
         
         for entry in sortedHistories {
-            guard !seenIds.contains(entry.deviceId) else { continue }
+            let nameNorm = entry.deviceName.trimmingCharacters(in: .whitespaces).lowercased()
+            
+            // Якщо це поточний активний пристрій — не показуємо в збережених
+            if (!currentNameNorm.isEmpty && nameNorm == currentNameNorm) || (!currentId.isEmpty && entry.deviceId == currentId) {
+                continue
+            }
+            
+            // Уникаємо дублювання за назвою або ID
+            guard !seenNames.contains(nameNorm) && !seenIds.contains(entry.deviceId) else { continue }
+            seenNames.insert(nameNorm)
             seenIds.insert(entry.deviceId)
             
-            // Якщо це не поточний активний пристрій
-            if entry.deviceId != currentDevice?.id {
-                let nameLower = entry.deviceName.lowercased()
-                let deviceType: DeviceType
-                let connectionType: AudioDevice.ConnectionType
-                
-                if nameLower.contains("airpod") || nameLower.contains("headphone") || nameLower.contains("навушник") {
-                    deviceType = .headphones
-                    connectionType = .bluetooth
-                } else if nameLower.contains("tv") || nameLower.contains("телевізор") {
-                    deviceType = .tv
-                    connectionType = .airplay
-                } else if nameLower.contains("speaker") || nameLower.contains("колонк") || nameLower.contains("jbl") {
-                    deviceType = .speaker
-                    connectionType = .bluetooth
-                } else if nameLower.contains("iphone") {
-                    deviceType = .iPhone
-                    connectionType = .builtIn
-                } else {
-                    deviceType = .speaker
-                    connectionType = .bluetooth
-                }
-                
-                result.append(AudioDevice(
-                    id: entry.deviceId,
-                    name: entry.deviceName,
-                    type: deviceType,
-                    connectionType: connectionType,
-                    lastKnownVolume: entry.volume,
-                    isConnected: false
-                ))
+            let deviceType: DeviceType
+            let connectionType: AudioDevice.ConnectionType
+            
+            if nameNorm.contains("mac") || nameNorm.contains("macbook") {
+                deviceType = .mac
+                connectionType = .airplay
+            } else if nameNorm.contains("airpod") || nameNorm.contains("headphone") || nameNorm.contains("навушник") {
+                deviceType = .headphones
+                connectionType = .bluetooth
+            } else if nameNorm.contains("tv") || nameNorm.contains("телевізор") {
+                deviceType = .tv
+                connectionType = .airplay
+            } else if nameNorm.contains("speaker") || nameNorm.contains("колонк") || nameNorm.contains("jbl") {
+                deviceType = .speaker
+                connectionType = .bluetooth
+            } else if nameNorm.contains("iphone") {
+                deviceType = .iPhone
+                connectionType = .builtIn
+            } else {
+                deviceType = .speaker
+                connectionType = .bluetooth
             }
+            
+            result.append(AudioDevice(
+                id: entry.deviceId,
+                name: entry.deviceName,
+                type: deviceType,
+                connectionType: connectionType,
+                lastKnownVolume: entry.volume,
+                isConnected: false
+            ))
         }
         
         // Mock-пристрої для демонстрації Safe Volume Handoff
         if showMockDevices {
             for mock in mockDevices {
-                if !seenIds.contains(mock.id) && mock.id != currentDevice?.id {
+                let mockNameNorm = mock.name.trimmingCharacters(in: .whitespaces).lowercased()
+                if !seenNames.contains(mockNameNorm) && mock.id != currentId && mockNameNorm != currentNameNorm {
                     result.append(mock)
                 }
             }

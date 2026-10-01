@@ -1,0 +1,16 @@
+# Xcode
+xcuserdata/
+DerivedData/
+*.xcuserstate
+.DS_Store
+
+# SwiftPM
+.build/
+CastlieMac/.build/
+
+# Node
+node_modules/
+server/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

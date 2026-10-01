@@ -8,8 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		0769C55C3849B079843A1021 /* DevicesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08A40CD231A7FDBD94593675 /* DevicesView.swift */; };
+		0D541A4F0DA9997212C94968 /* SystemVolumeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FE7903B4D6AEA341192542A /* SystemVolumeController.swift */; };
 		11B294B3A97BCBDB41CD0182 /* DeviceDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AA0AE46C048EDE0D88E5795 /* DeviceDiscoveryService.swift */; };
 		138EA1C809185654D3A31B4D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A71B385C277B78D4BE8DB168 /* Assets.xcassets */; };
+		16918358952D68B93692D05E /* CastlieConnectService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8918B313E89594701425001 /* CastlieConnectService.swift */; };
 		1B251B555FDC181C7DED5463 /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1A20B84CF490CBB329D81F /* HomeViewModel.swift */; };
 		1C3B6C16C825835C516BA278 /* Color+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E28BB82DB6D1D0F901F2E86 /* Color+Hex.swift */; };
 		1C95AA171EFDD246C6682C48 /* SafeVolumeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FEE88BE96E7DB390B655A5D /* SafeVolumeManager.swift */; };
@@ -72,6 +74,7 @@
 		3D26715616DFA9DACB7D18FD /* VolumeLimitSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeLimitSettings.swift; sourceTree = "<group>"; };
 		4DBA58992A8F4575320013E8 /* AirPlayPickerButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirPlayPickerButton.swift; sourceTree = "<group>"; };
 		4E28BB82DB6D1D0F901F2E86 /* Color+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
+		50A9060CC1DDF38EC3B246B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		520CBAE7EA8DEF099E98D5C1 /* FadeInEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FadeInEngine.swift; sourceTree = "<group>"; };
 		551E4A5FF1F50B1EEEC30C67 /* PlaybackControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackControlsView.swift; sourceTree = "<group>"; };
 		5991AD9CB2DC728E7F251FA2 /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
@@ -84,6 +87,7 @@
 		77C1001074BC1EDB357679A3 /* SearchViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchViewModel.swift; sourceTree = "<group>"; };
 		79B030C18D43CEC7D30F3204 /* AudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngine.swift; sourceTree = "<group>"; };
 		7C0318C88D31796222006A57 /* SpotifyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyModels.swift; sourceTree = "<group>"; };
+		7FE7903B4D6AEA341192542A /* SystemVolumeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemVolumeController.swift; sourceTree = "<group>"; };
 		8AA0AE46C048EDE0D88E5795 /* DeviceDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceDiscoveryService.swift; sourceTree = "<group>"; };
 		8FEE88BE96E7DB390B655A5D /* SafeVolumeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafeVolumeManager.swift; sourceTree = "<group>"; };
 		92FCC97BB1CA95BE8E50F8E6 /* FullPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullPlayerView.swift; sourceTree = "<group>"; };
@@ -91,6 +95,7 @@
 		A4F3584785C2AB987FB9E35A /* ProgressBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressBarView.swift; sourceTree = "<group>"; };
 		A71B385C277B78D4BE8DB168 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A79D3EEF133A73BDB018982B /* FadeInSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FadeInSettings.swift; sourceTree = "<group>"; };
+		A8918B313E89594701425001 /* CastlieConnectService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CastlieConnectService.swift; sourceTree = "<group>"; };
 		AAD5876AB67CA9D0C7E04401 /* PlaylistView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistView.swift; sourceTree = "<group>"; };
 		AB1A20B84CF490CBB329D81F /* HomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
 		ABED7A2D16542F96DB42FAF7 /* SafetyIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyIndicator.swift; sourceTree = "<group>"; };
@@ -177,6 +182,7 @@
 				A71B385C277B78D4BE8DB168 /* Assets.xcassets */,
 				0B78F411D1A3A8445F0044C3 /* CastlieApp.swift */,
 				E178D3B7E67747B142ABBC8A /* ContentView.swift */,
+				50A9060CC1DDF38EC3B246B6 /* Info.plist */,
 				664A70F1BE0342D28F622492 /* Components */,
 				AB801807ABD10BB79009987D /* Extensions */,
 				E7BA66513767A8E029AB4814 /* Models */,
@@ -242,6 +248,7 @@
 			isa = PBXGroup;
 			children = (
 				79B030C18D43CEC7D30F3204 /* AudioEngine.swift */,
+				A8918B313E89594701425001 /* CastlieConnectService.swift */,
 				8AA0AE46C048EDE0D88E5795 /* DeviceDiscoveryService.swift */,
 				520CBAE7EA8DEF099E98D5C1 /* FadeInEngine.swift */,
 				D62F95C12F4D092983475E90 /* HapticFeedbackService.swift */,
@@ -250,6 +257,7 @@
 				8FEE88BE96E7DB390B655A5D /* SafeVolumeManager.swift */,
 				F5938679566C3E242FED7140 /* SpotifyAPIService.swift */,
 				1C87E2D6EC051266D2693CEE /* SpotifyAuthService.swift */,
+				7FE7903B4D6AEA341192542A /* SystemVolumeController.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -376,6 +384,7 @@
 				7192574941FD5B9539D2FACA /* AudioDevice.swift in Sources */,
 				5953493747FA345AF26C4771 /* AudioEngine.swift in Sources */,
 				AE71B4AB92B95D659AA907D6 /* CastlieApp.swift in Sources */,
+				16918358952D68B93692D05E /* CastlieConnectService.swift in Sources */,
 				57D236DEE952210BD357CE74 /* Color+DominantColor.swift in Sources */,
 				1C3B6C16C825835C516BA278 /* Color+Hex.swift in Sources */,
 				24438BAEAD72DE536EF8086F /* ContentView.swift in Sources */,
@@ -412,6 +421,7 @@
 				E1935945A56B331C1A0C18A7 /* SpotifyAuthService.swift in Sources */,
 				C33E786B1F50DD5686209462 /* SpotifyModels.swift in Sources */,
 				C1EBF52B213E6F161C9FF471 /* SpotifyTrackRow.swift in Sources */,
+				0D541A4F0DA9997212C94968 /* SystemVolumeController.swift in Sources */,
 				6A89F26FC2429C6DFFF48FB6 /* ThemeManager.swift in Sources */,
 				B6D48AB60C4CD6B547F5F898 /* Track.swift in Sources */,
 				4591D7D159AFF6BBFE63FD6F /* TrackCardView.swift in Sources */,
@@ -479,6 +489,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIBackgroundModes = audio;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -504,10 +515,8 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				DEVELOPMENT_TEAM = RCB9V8KY57;
+				INFOPLIST_FILE = Castlie/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Castlie;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -569,6 +578,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIBackgroundModes = audio;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -593,10 +603,8 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				DEVELOPMENT_TEAM = RCB9V8KY57;
+				INFOPLIST_FILE = Castlie/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Castlie;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

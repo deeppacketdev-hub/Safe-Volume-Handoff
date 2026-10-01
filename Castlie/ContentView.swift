@@ -35,17 +35,24 @@ struct ContentView: View {
             }
             .tint(ThemeManager.shared.accent)
             
-            // Міні-плеєр — показується тільки коли є трек
+            // Міні-плеєр — показується тільки коли є трек (парить над TabBar як острівець)
             if audioEngine.currentTrack != nil {
                 MiniPlayerView(showFullPlayer: $showFullPlayer)
-                    .padding(.bottom, 49) // Висота TabBar = 49pt
+                    .padding(.bottom, 54) // Відступ над стандартним TabBar
                     .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .animation(.spring(response: 0.3), value: audioEngine.currentTrack != nil)
+                    .animation(.spring(response: 0.38, dampingFraction: 0.82), value: audioEngine.currentTrack != nil)
             }
+            
+            // Системний невидимий міст для перехоплення та синхронізації апаратної гучності (Mac, AirPlay, Bluetooth)
+            SystemVolumeBridge()
+                .frame(width: 1, height: 1)
+                .opacity(0.0001)
+                .allowsHitTesting(false)
         }
         .preferredColorScheme(.dark)
         .fullScreenCover(isPresented: $showFullPlayer) {
             FullPlayerView(isPresented: $showFullPlayer)
+                .presentationBackground(.clear)
         }
     }
 }

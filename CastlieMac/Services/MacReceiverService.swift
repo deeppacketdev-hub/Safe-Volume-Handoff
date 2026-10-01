@@ -1,0 +1,218 @@
+import AppKit
+import Foundation
+import Observation
+
+struct RemoteTrackInfo: Codable, Identifiable {
+    var id: String
+    var name: String
+    var artistName: String
+    var albumName: String?
+    var albumArtURL: String?
+    var previewURL: String?
+}
+
+@Observable
+@MainActor
+final class MacReceiverService: NSObject {
+    static let shared = MacReceiverService()
+    
+    // Status & Connected Client
+    private(set) var isConnectedToServer: Bool = false
+    private(set) var serverDomain: String = "castlie.dron.lol"
+    private(set) var deviceName: String = Host.current().localizedName ?? "MacBook Pro"
+    private(set) var deviceId: String = "mac_" + UUID().uuidString.prefix(6)
+    private(set) var connectedUser: String? = nil
+    
+    // Now playing
+    private(set) var currentTrack: RemoteTrackInfo? = nil
+    
+    private var webSocketTask: URLSessionWebSocketTask?
+    private var session: URLSession?
+    private var isReconnecting = false
+    
+    let audioPlayer = MacAudioPlayer.shared
+    
+    var isPlaying: Bool {
+        audioPlayer.isPlaying
+    }
+    
+    var volume: Float {
+        audioPlayer.volume
+    }
+    
+    private override init() {
+        super.init()
+        setupSession()
+        connect()
+    }
+    
+    private func setupSession() {
+        let config = URLSessionConfiguration.default
+        config.waitsForConnectivity = true
+        session = URLSession(configuration: config)
+    }
+    
+    func connect() {
+        disconnect()
+        
+        let urlString = "wss://\(serverDomain)/ws?roomId=default"
+        guard let url = URL(string: urlString) else { return }
+        
+        webSocketTask = session?.webSocketTask(with: url)
+        webSocketTask?.resume()
+        
+        isConnectedToServer = true
+        sendRegistration()
+        listenForMessages()
+    }
+    
+    func disconnect() {
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
+        isConnectedToServer = false
+    }
+    
+    // MARK: - Outgoing Messages
+    
+    private func sendRegistration() {
+        let payload: [String: Any] = [
+            "type": "register",
+            "role": "receiver",
+            "deviceId": deviceId,
+            "name": deviceName,
+            "volume": audioPlayer.volume,
+            "isPlaying": audioPlayer.isPlaying,
+            "currentTrack": currentTrack.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) } as Any
+        ]
+        send(json: payload)
+    }
+    
+    func updateVolume(_ newVol: Float) {
+        audioPlayer.setVolume(newVol)
+        send(json: [
+            "type": "volume_update",
+            "deviceId": deviceId,
+            "volume": newVol
+        ])
+    }
+    
+    private func send(json: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: json),
+              let string = String(data: data, encoding: .utf8) else { return }
+        
+        webSocketTask?.send(.string(string)) { [weak self] error in
+            if let error {
+                print("[MacReceiver] WS Send error: \(error.localizedDescription)")
+                Task { @MainActor in
+                    self?.handleDisconnect()
+                }
+            }
+        }
+    }
+    
+    // MARK: - Incoming Messages
+    
+    private func listenForMessages() {
+        webSocketTask?.receive { [weak self] result in
+            Task { @MainActor in
+                guard let self else { return }
+                switch result {
+                case .success(let message):
+                    switch message {
+                    case .string(let text):
+                        self.handleIncomingText(text)
+                    case .data(let data):
+                        if let text = String(data: data, encoding: .utf8) {
+                            self.handleIncomingText(text)
+                        }
+                    @unknown default:
+                        break
+                    }
+                    self.listenForMessages()
+                    
+                case .failure(let error):
+                    print("[MacReceiver] WS Receive error: \(error.localizedDescription)")
+                    self.handleDisconnect()
+                }
+            }
+        }
+    }
+    
+    private func handleIncomingText(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String else { return }
+        
+        switch type {
+        case "perform_handoff":
+            guard let trackData = json["track"] as? [String: Any],
+                  let previewURLString = trackData["previewURL"] as? String,
+                  let previewURL = URL(string: previewURLString) else { return }
+            
+            let track = RemoteTrackInfo(
+                id: trackData["id"] as? String ?? UUID().uuidString,
+                name: trackData["name"] as? String ?? "Track",
+                artistName: trackData["artistName"] as? String ?? "Artist",
+                albumName: trackData["albumName"] as? String,
+                albumArtURL: trackData["albumArtURL"] as? String,
+                previewURL: previewURLString
+            )
+            
+            let targetVol = (json["targetVolume"] as? NSNumber)?.floatValue ?? 0.35
+            let fadeIn = (json["fadeInDuration"] as? NSNumber)?.doubleValue ?? 2.0
+            let sender = json["senderName"] as? String ?? "iPhone"
+            
+            self.currentTrack = track
+            self.connectedUser = sender
+            
+            // Execute Safe Handoff Playback
+            audioPlayer.play(url: previewURL, targetVolume: targetVol, fadeInDuration: fadeIn)
+            
+            // Broadcast updated playback state
+            send(json: [
+                "type": "playback_state",
+                "deviceId": deviceId,
+                "isPlaying": true,
+                "currentTrack": [
+                    "id": track.id,
+                    "name": track.name,
+                    "artistName": track.artistName,
+                    "albumArtURL": track.albumArtURL as Any
+                ],
+                "connectedUser": sender
+            ])
+            
+        case "volume_changed":
+            if let devId = json["deviceId"] as? String, devId == deviceId,
+               let newVol = (json["volume"] as? NSNumber)?.floatValue {
+                audioPlayer.setVolume(newVol)
+            }
+            
+        case "remote_playback_command":
+            if let action = json["action"] as? String {
+                switch action {
+                case "toggle": audioPlayer.togglePlayPause()
+                case "pause": audioPlayer.pause()
+                case "play": audioPlayer.resume()
+                case "stop": audioPlayer.stop()
+                default: break
+                }
+            }
+            
+        default:
+            break
+        }
+    }
+    
+    private func handleDisconnect() {
+        isConnectedToServer = false
+        guard !isReconnecting else { return }
+        isReconnecting = true
+        
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            self.isReconnecting = false
+            self.connect()
+        }
+    }
+}

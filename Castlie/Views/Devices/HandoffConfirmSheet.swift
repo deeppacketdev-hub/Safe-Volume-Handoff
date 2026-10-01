@@ -63,6 +63,21 @@ struct HandoffConfirmSheet: View {
                 
                 // Індикатор безпеки
                 SafetyIndicator(level: safety)
+                
+                if adjustedVolume > safeVolume.config.effectiveMaxVolume {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(Color(hex: "FF9500"))
+                        Text("Вище рекомендованого порогу (\(Int(safeVolume.config.effectiveMaxVolume * 100))%)")
+                            .font(AppFonts.caption2)
+                            .foregroundStyle(Color(hex: "FF9500"))
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 10)
+                    .background(Color(hex: "FF9500").opacity(0.12))
+                    .clipShape(Capsule())
+                }
             }
             .padding()
             .background(
@@ -117,11 +132,9 @@ struct HandoffConfirmSheet: View {
         }
         .padding(24)
         .background(ThemeManager.shared.primaryBackground.ignoresSafeArea())
-        .onChange(of: adjustedVolume) { _, newValue in
-            // Обмежити гучність максимальним порогом
-            let maxAllowed = safeVolume.config.effectiveMaxVolume
-            if newValue > maxAllowed {
-                adjustedVolume = maxAllowed
+        .onChange(of: adjustedVolume) { oldValue, newValue in
+            let threshold = safeVolume.config.effectiveMaxVolume
+            if oldValue <= threshold && newValue > threshold {
                 HapticFeedbackService.warning()
             }
         }

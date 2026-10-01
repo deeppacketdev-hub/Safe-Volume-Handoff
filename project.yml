@@ -13,6 +13,7 @@ settings:
     TARGETED_DEVICE_FAMILY: "1,2"
     SUPPORTS_MAC_DESIGNED_FOR_IPAD: "YES"
     INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+    INFOPLIST_KEY_UIBackgroundModes: "audio"
     INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait"
     INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
     GENERATE_INFOPLIST_FILE: "YES"
@@ -29,6 +30,11 @@ targets:
       - path: Castlie
         excludes:
           - "**/.DS_Store"
+    info:
+      path: Castlie/Info.plist
+      properties:
+        UIBackgroundModes:
+          - audio
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.castlie.app

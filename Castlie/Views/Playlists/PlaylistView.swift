@@ -122,7 +122,8 @@ struct PlaylistView: View {
                     }
                 }
             }
-            .padding(.vertical)
+            .padding(.top)
+            .padding(.bottom, audioEngine.currentTrack != nil ? 80 : 24)
         }
         .background(ThemeManager.shared.primaryBackground.ignoresSafeArea())
         .navigationTitle(title)

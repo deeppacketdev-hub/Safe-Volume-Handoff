@@ -1,0 +1,21 @@
+# Ignore iOS and Xcode files completely
+Castlie/
+CastlieMac/
+Castlie.xcodeproj/
+Castlie.xcworkspace/
+project.yml
+*.xcworkspace
+*.xcodeproj
+*.playground
+Pods/
+DerivedData/
+
+# Git and Agents
+.git/
+.gitignore
+.agents/
+.DS_Store
+
+# Documentation and PDF
+*.pdf
+*.md

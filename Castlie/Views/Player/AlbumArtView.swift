@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AlbumArtView: View {
     let track: Track
+    var isPlaying: Bool = true
     var onColorExtracted: ((Color) -> Void)?
     
     var body: some View {
@@ -11,8 +12,14 @@ struct AlbumArtView: View {
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .shadow(
+                        color: .black.opacity(isPlaying ? 0.45 : 0.2),
+                        radius: isPlaying ? 24 : 10,
+                        y: isPlaying ? 12 : 5
+                    )
+                    .scaleEffect(isPlaying ? 1.0 : 0.86)
+                    .animation(.spring(response: 0.42, dampingFraction: 0.75), value: isPlaying)
                     .onAppear {
                         // Витягуємо домінантний колір
                         Task {
@@ -41,9 +48,11 @@ struct AlbumArtView: View {
     }
     
     private var albumPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 16)
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
             .fill(ThemeManager.shared.cardBackground)
             .aspectRatio(1, contentMode: .fit)
+            .scaleEffect(isPlaying ? 1.0 : 0.86)
+            .animation(.spring(response: 0.42, dampingFraction: 0.75), value: isPlaying)
             .overlay {
                 Image(systemName: "music.note")
                     .font(.system(size: 60))

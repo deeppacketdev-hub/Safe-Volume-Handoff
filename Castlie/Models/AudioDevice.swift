@@ -2,6 +2,7 @@ import Foundation
 
 enum DeviceType: String, Codable, CaseIterable {
     case iPhone = "iphone"
+    case mac = "laptopcomputer"
     case speaker = "hifispeaker.fill"
     case tv = "tv.fill"
     case headphones = "headphones"
@@ -15,6 +16,7 @@ enum DeviceType: String, Codable, CaseIterable {
     var displayName: String {
         switch self {
         case .iPhone: return "iPhone"
+        case .mac: return "Mac"
         case .speaker: return "Колонка"
         case .tv: return "Телевізор"
         case .headphones: return "Навушники"

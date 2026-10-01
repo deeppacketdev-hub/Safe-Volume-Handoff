@@ -49,10 +49,20 @@ struct NightModeSettings: View {
                 
                 Slider(
                     value: $safeVolume.config.nightModeMaxVolume,
-                    in: 0.1...0.5,
+                    in: 0.1...1.0,
                     step: 0.05
                 )
                 .tint(ThemeManager.shared.accent)
+                
+                HStack {
+                    Text("10%")
+                        .font(AppFonts.caption2)
+                        .foregroundStyle(ThemeManager.shared.secondaryText)
+                    Spacer()
+                    Text("100%")
+                        .font(AppFonts.caption2)
+                        .foregroundStyle(ThemeManager.shared.secondaryText)
+                }
             }
             
             // Статус

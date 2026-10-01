@@ -63,6 +63,11 @@ struct SettingsView: View {
                     Label("Про додаток", systemImage: "info.circle.fill")
                 }
             }
+            .safeAreaInset(edge: .bottom) {
+                if AudioEngine.shared.currentTrack != nil {
+                    Color.clear.frame(height: 70)
+                }
+            }
             .scrollContentBackground(.hidden)
             .background(ThemeManager.shared.primaryBackground.ignoresSafeArea())
             .navigationTitle("Налаштування")

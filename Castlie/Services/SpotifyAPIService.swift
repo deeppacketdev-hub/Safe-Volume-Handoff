@@ -29,9 +29,7 @@ class SpotifyAPIService {
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         let response = try decoder.decode(SpotifySearchResponse.self, from: data)
         
-        // Фільтруємо треки без прев'ю (вони нам не потрібні)
         return response.tracks?.items
-            .filter { $0.previewUrl != nil }
             .map { $0.toTrack() } ?? []
     }
     
@@ -83,7 +81,6 @@ class SpotifyAPIService {
         let albumImageURL = albumFull.images.first.flatMap { URL(string: $0.url) }
         
         return albumFull.tracks.items
-            .filter { $0.previewUrl != nil }
             .map { item in
                 Track(
                     id: item.id,
@@ -101,20 +98,11 @@ class SpotifyAPIService {
     // MARK: - Recommendations
     
     /// Отримати рекомендації за жанрами
-    /// Доступні жанри: pop, rock, hip-hop, electronic, jazz, classical, r-n-b, indie, metal, latin
     func getRecommendations(genres: [String], limit: Int = 20) async throws -> [Track] {
-        let genresString = genres.joined(separator: ",")
-        let urlString = "\(baseURL)/recommendations?seed_genres=\(genresString)&limit=\(limit)"
-        
-        let data = try await makeRequest(urlString: urlString)
-        
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let response = try decoder.decode(SpotifyRecommendationsResponse.self, from: data)
-        
-        return response.tracks
-            .filter { $0.previewUrl != nil }
-            .map { $0.toTrack() }
+        // Spotify API закрив ендпоінт /recommendations (повертає 404),
+        // тому отримуємо актуальні топові треки через пошуковий запит
+        let query = genres.joined(separator: " OR ")
+        return try await searchTracks(query: query.isEmpty ? "top hits" : query, limit: limit)
     }
     
     // MARK: - Private: Make Request

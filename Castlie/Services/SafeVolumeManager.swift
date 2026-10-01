@@ -82,28 +82,53 @@ class SafeVolumeManager {
     
     // MARK: - Device History
     
-    /// Зберегти запис про підключення
+    /// Зберегти запис про підключення без дублювання
     func recordConnection(deviceId: String, deviceName: String, volume: Float) {
+        let cleanName = deviceName.trimmingCharacters(in: .whitespaces)
+        guard !cleanName.isEmpty else { return }
+        
+        // Видаляємо всі попередні записи для цього ж пристрою (за ID або за назвою)
+        deviceHistories.removeAll {
+            $0.deviceId == deviceId || $0.deviceName.lowercased() == cleanName.lowercased()
+        }
+        
         let entry = DeviceHistoryEntry(
             deviceId: deviceId,
-            deviceName: deviceName,
+            deviceName: cleanName,
             volume: volume,
             wasNightMode: config.isNightModeActive
         )
-        deviceHistories.append(entry)
+        // Вставляємо оновлений запис на початок
+        deviceHistories.insert(entry, at: 0)
         
-        // Тримаємо максимум 100 записів
-        if deviceHistories.count > 100 {
-            deviceHistories = Array(deviceHistories.suffix(100))
+        // Тримаємо максимум 50 записів
+        if deviceHistories.count > 50 {
+            deviceHistories = Array(deviceHistories.prefix(50))
         }
         
         saveHistories()
+    }
+    
+    /// Видалити збережений пристрій з історії
+    func removeDevice(deviceId: String) {
+        deviceHistories.removeAll { $0.deviceId == deviceId }
+        saveHistories()
+        HapticFeedbackService.light()
     }
     
     /// Отримати останню відому гучність для пристрою
     func lastKnownVolume(for deviceId: String) -> Float? {
         deviceHistories
             .filter { $0.deviceId == deviceId }
+            .sorted { $0.timestamp > $1.timestamp }
+            .first?.volume
+    }
+    
+    /// Отримати останню відому гучність за назвою пристрою
+    func lastKnownVolume(forDeviceName name: String) -> Float? {
+        let clean = name.trimmingCharacters(in: .whitespaces).lowercased()
+        return deviceHistories
+            .filter { $0.deviceName.lowercased() == clean }
             .sorted { $0.timestamp > $1.timestamp }
             .first?.volume
     }
@@ -132,7 +157,18 @@ class SafeVolumeManager {
     private func loadHistories() {
         if let data = UserDefaults.standard.data(forKey: historyKey),
            let saved = try? JSONDecoder().decode([DeviceHistoryEntry].self, from: data) {
-            deviceHistories = saved
+            // Очищення старих дублікатів за назвою пристрою
+            var seen = Set<String>()
+            var clean: [DeviceHistoryEntry] = []
+            for entry in saved.sorted(by: { $0.timestamp > $1.timestamp }) {
+                let key = entry.deviceName.trimmingCharacters(in: .whitespaces).lowercased()
+                if !seen.contains(key) {
+                    seen.insert(key)
+                    clean.append(entry)
+                }
+            }
+            deviceHistories = clean
+            saveHistories()
         }
     }
 }

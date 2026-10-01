@@ -5,9 +5,8 @@ import Foundation
 class SpotifyAuthService {
     static let shared = SpotifyAuthService()
     
-    // ЗАМІНИТИ НА СВОЇ ЗНАЧЕННЯ з https://developer.spotify.com/dashboard
-    private let clientId = "YOUR_CLIENT_ID"
-    private let clientSecret = "YOUR_CLIENT_SECRET"
+    private let clientId = "1cbe4690e8b943798c9cffef250c1f23"
+    private let clientSecret = "9febd0d9ced94176a800a279bfdcaabe"
     
     private(set) var accessToken: String?
     private var tokenExpirationDate: Date?

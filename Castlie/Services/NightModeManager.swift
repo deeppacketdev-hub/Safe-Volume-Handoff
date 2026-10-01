@@ -7,7 +7,7 @@ class NightModeManager {
     static let shared = NightModeManager()
     
     private(set) var isActive = false
-    nonisolated(unsafe) private var timer: Timer?
+    private var timer: Timer?
     
     private init() {
         checkNightMode()
@@ -27,9 +27,5 @@ class NightModeManager {
                 NightModeManager.shared.checkNightMode()
             }
         }
-    }
-    
-    deinit {
-        timer?.invalidate()
     }
 }
