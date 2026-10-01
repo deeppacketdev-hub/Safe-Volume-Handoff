@@ -105,7 +105,7 @@ struct DevicesView: View {
                         Text("Не знайдено пристроїв у мережі")
                             .font(AppFonts.subheadline)
                             .foregroundStyle(ThemeManager.shared.primaryText)
-                        Text("Переконайтеся, що Castlie Connect запущено на Mac")
+                        Text("Переконайтеся, що Castlie Connect запущено на іншому пристрої")
                             .font(AppFonts.caption)
                             .foregroundStyle(ThemeManager.shared.secondaryText)
                     }
