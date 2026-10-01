@@ -1,8 +1,8 @@
-# 🎧 Safe Volume Handoff — Проєктний План iOS Додатку
+# Castlie — Проєктний План iOS Додатку
 
 ## Огляд Проєкту
 
-**Safe Volume Handoff** — повноцінний музичний плеєр для iOS, головною фішкою якого є **безпечне перемикання аудіо на зовнішні пристрої** з попереднім контролем гучності.
+**Castlie** — повноцінний музичний плеєр для iOS, головною фішкою якого є **Safe Volume Handoff** — безпечне перемикання аудіо на зовнішні пристрої з попереднім контролем гучності. Музика підтягується через **Spotify Web API** (30-секундні прев'ю треків з якісними обкладинками).
 
 Додаток вирішує реальні проблеми, виявлені в [дослідженні Spotify Connect](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Лаба%201%20ЛМВ.pdf):
 
@@ -11,7 +11,6 @@
 | Непередбачуваний рівень гучності при підключенні (П2, П9) | Попередній перегляд гучності + діалог підтвердження |
 | Страх раптового гучного звуку ввечері | Night Mode з автоматичним обмеженням гучності |
 | Колонка грає на своєму попередньому рівні | Fade-in + максимальний поріг |
-| Неможливість швидко зупинити звук (П4) | Аварійна кнопка STOP |
 | Хибний workaround: скручування гучності телефону | Історія пристроїв із запам'ятовуванням рівня |
 
 ---
@@ -24,12 +23,12 @@
 | Мова | Swift 6 |
 | UI Framework | SwiftUI |
 | Архітектура | MVVM + `@Observable` macro |
-| Аудіо | AVFoundation + MediaPlayer |
+| Аудіо | AVFoundation (AVPlayer для Spotify прев'ю) |
 | Пристрої | AVRoutePickerView (AirPlay) + CoreBluetooth |
-| Онлайн-каталог | Jamendo API (безкоштовний) |
-| Локальна музика | MPMediaLibrary (бібліотека iPhone) |
+| Музика | Spotify Web API (30с прев'ю треків) |
 | Зберігання | SwiftData / UserDefaults |
-| Мова інтерфейсу | Українська 🇺🇦 |
+| Іконки | SF Symbols (без емоджі) |
+| Мова інтерфейсу | Українська |
 
 ---
 
@@ -53,8 +52,8 @@
 ```mermaid
 graph TB
     subgraph "UI Layer (SwiftUI)"
-        A[TabView] --> B[Бібліотека]
-        A --> C[Онлайн-каталог]
+        A[TabView] --> B["Головна (Spotify)"]
+        A --> C[Пошук]
         A --> D[Пристрої]
         A --> E[Налаштування]
         F[Міні-плеєр] --> G[Повноекранний плеєр]
@@ -63,8 +62,8 @@ graph TB
     subgraph "ViewModel Layer (@Observable)"
         H[AudioPlayerVM]
         I[DeviceManagerVM]
-        J[LibraryVM]
-        K[OnlineCatalogVM]
+        J[HomeVM]
+        K[SearchVM]
         L[SettingsVM]
     end
     
@@ -72,8 +71,8 @@ graph TB
         M[AudioEngine]
         N[DeviceDiscovery]
         O[SafeVolumeManager]
-        P[JamendoAPI]
-        Q[MediaLibraryService]
+        P[SpotifyAPIService]
+        Q[SpotifyAuthService]
         R[ThemeManager]
     end
     
@@ -83,7 +82,7 @@ graph TB
         U[Playlists]
     end
 
-    B --> J --> Q
+    B --> J --> P
     C --> K --> P
     D --> I --> N
     E --> L
@@ -92,6 +91,7 @@ graph TB
     I --> O
     O --> T
     L --> S
+    P --> Q
 ```
 
 ---
@@ -99,8 +99,8 @@ graph TB
 ## Структура Проєкту
 
 ```
-SafeVolumeHandoff/
-├── SafeVolumeHandoffApp.swift          # Точка входу
+Castlie/
+├── CastlieApp.swift                     # Точка входу
 ├── ContentView.swift                    # TabView + міні-плеєр
 │
 ├── Theme/
@@ -109,40 +109,41 @@ SafeVolumeHandoff/
 │   └── AppFonts.swift                   # Типографіка
 │
 ├── Models/
-│   ├── Track.swift                      # Модель треку
+│   ├── Track.swift                      # Уніфікована модель треку
 │   ├── Playlist.swift                   # Модель плейлиста
 │   ├── AudioDevice.swift                # Модель аудіопристрою
 │   ├── DeviceHistory.swift              # Історія підключень з гучністю
-│   └── SafeVolumeConfig.swift           # Конфігурація safe mode
+│   ├── SafeVolumeConfig.swift           # Конфігурація safe mode
+│   └── SpotifyModels.swift              # Моделі для Spotify API відповідей
 │
 ├── ViewModels/
 │   ├── AudioPlayerViewModel.swift       # Керування відтворенням
 │   ├── DeviceManagerViewModel.swift     # Виявлення та підключення пристроїв
-│   ├── LibraryViewModel.swift           # Бібліотека iPhone
-│   ├── OnlineCatalogViewModel.swift     # Jamendo API
+│   ├── HomeViewModel.swift              # Головна: нові релізи, рекомендації
+│   ├── SearchViewModel.swift            # Пошук по Spotify
 │   └── SettingsViewModel.swift          # Налаштування
 │
 ├── Services/
-│   ├── AudioEngine.swift                # AVAudioPlayer / AVAudioSession
+│   ├── AudioEngine.swift                # AVPlayer для Spotify прев'ю
 │   ├── DeviceDiscoveryService.swift     # AirPlay + Bluetooth discovery
-│   ├── SafeVolumeManager.swift          # 🔑 КЛЮЧОВИЙ: логіка safe handoff
+│   ├── SafeVolumeManager.swift          # КЛЮЧОВИЙ: логіка safe handoff
 │   ├── FadeInEngine.swift               # Плавне наростання гучності
 │   ├── NightModeManager.swift           # Часовий профіль
-│   ├── JamendoAPIService.swift          # HTTP-клієнт для Jamendo
-│   ├── MediaLibraryService.swift        # Доступ до MPMediaLibrary
+│   ├── SpotifyAPIService.swift          # HTTP-клієнт для Spotify Web API
+│   ├── SpotifyAuthService.swift         # OAuth 2.0 Client Credentials flow
 │   └── HapticFeedbackService.swift      # Вібрація при подіях
 │
 ├── Views/
-│   ├── Library/
-│   │   ├── LibraryView.swift            # Таб бібліотеки
-│   │   ├── TrackListView.swift          # Список треків
-│   │   ├── TrackRowView.swift           # Рядок треку
+│   ├── Home/
+│   │   ├── HomeView.swift               # Головна: нові релізи, категорії
+│   │   ├── TrackCardView.swift          # Картка треку з обкладинкою
+│   │   ├── NewReleasesSection.swift     # Секція нових релізів
 │   │   └── PlaylistView.swift           # Вигляд плейлиста
 │   │
-│   ├── OnlineCatalog/
-│   │   ├── OnlineCatalogView.swift      # Таб онлайн-каталогу
-│   │   ├── SearchView.swift             # Пошук по Jamendo
-│   │   └── OnlineTrackRow.swift         # Рядок онлайн-треку
+│   ├── Search/
+│   │   ├── SearchView.swift             # Пошук по Spotify
+│   │   ├── SearchResultsView.swift      # Результати пошуку
+│   │   └── SpotifyTrackRow.swift        # Рядок треку з обкладинкою
 │   │
 │   ├── Player/
 │   │   ├── MiniPlayerView.swift         # Міні-плеєр внизу
@@ -150,14 +151,13 @@ SafeVolumeHandoff/
 │   │   ├── AlbumArtView.swift           # Обкладинка з адаптивним фоном
 │   │   ├── PlaybackControlsView.swift   # Кнопки play/pause/skip
 │   │   ├── ProgressBarView.swift        # Прогрес-бар
-│   │   ├── VolumeSliderView.swift       # Повзунок гучності
-│   │   └── EmergencyStopButton.swift    # 🔴 Аварійна кнопка STOP
+│   │   └── VolumeSliderView.swift       # Повзунок гучності
 │   │
 │   ├── Devices/
 │   │   ├── DevicesView.swift            # Таб пристроїв
 │   │   ├── DeviceCardView.swift         # Картка пристрою
 │   │   ├── DeviceVolumePreview.swift    # Попередній перегляд гучності
-│   │   ├── HandoffConfirmSheet.swift    # 🔑 Діалог підтвердження
+│   │   ├── HandoffConfirmSheet.swift    # Діалог підтвердження
 │   │   └── HandoffAnimationView.swift   # Анімація передачі
 │   │
 │   └── Settings/
@@ -179,63 +179,74 @@ SafeVolumeHandoff/
     └── AVAudioSession+SafeVolume.swift  # Розширення аудіосесії
 ```
 
+> [!IMPORTANT]
+> В додатку використовуються виключно **SF Symbols** для іконок — жодних емоджі!
+
 ---
 
 ## Ключові Екрани
 
-### 1. 📚 Бібліотека (Library Tab)
-- Список локальних треків з бібліотеки iPhone
-- Плейлисти (створення, редагування)
-- Пошук по назві / виконавцю
-- Сортування (за назвою, датою, виконавцем)
+### 1. Головна (Home Tab)
+**SF Symbol**: `music.note.house.fill`
+- Нові релізи з Spotify
+- Рекомендації за жанрами
+- Плейлисти (створені користувачем у додатку)
+- Горизонтальні секції з обкладинками альбомів
 
-### 2. 🌐 Онлайн-каталог (Online Tab)  
-- Пошук треків через **Jamendo API** (безкоштовна ліцензована музика)
-- Жанри / категорії
-- Прослуховування + додавання до локальних плейлистів
+### 2. Пошук (Search Tab)
+**SF Symbol**: `magnifyingglass`
+- Пошук треків через **Spotify Web API**
+- Гарні обкладинки альбомів від Spotify
+- 30-секундні прев'ю треків
+- Фільтр за жанром / виконавцем
 
-### 3. 🎵 Плеєр (Now Playing)
+### 3. Плеєр (Now Playing)
+**SF Symbol**: `play.circle.fill`
 - **Міні-плеєр** — завжди видимий внизу, показує поточний трек
 - **Повноекранний плеєр** — відкривається плавною анімацією з міні-плеєра:
   - Обкладинка альбому з **адаптивним фоном** (домінантний колір)
-  - Прогрес-бар із можливістю перемотки
+  - Прогрес-бар із можливістю перемотки (30 секунд)
   - Play/Pause, Skip, Previous
   - Повзунок гучності з індикатором безпеки
-  - 🔴 **Аварійна кнопка STOP** — велика червона кнопка для миттєвої зупинки
-  - Іконка поточного пристрою (натискання → перехід до пристроїв)
+  - Іконка поточного пристрою (`hifispeaker.fill` — натискання → перехід до пристроїв)
 
-### 4. 📡 Пристрої (Devices Tab) — **ГОЛОВНИЙ ЕКРАН ПРОЄКТУ**
+### 4. Пристрої (Devices Tab) — **ГОЛОВНИЙ ЕКРАН ПРОЄКТУ**
+**SF Symbol**: `hifispeaker.2.fill`
+
 Це серце додатку — тут реалізовані всі UX-рішення з дослідження:
 
 ```
 ┌─────────────────────────────────┐
-│  📡 Пристрої                    │
+│  [hifispeaker.2] Пристрої       │
 │                                  │
-│  ▶ Цей iPhone          🟢 100% │
+│  [iphone] Цей iPhone    ● 100%  │
 │  ─────────────────────────────  │
 │                                  │
 │  Доступні пристрої:              │
 │                                  │
 │  ┌─────────────────────────────┐│
-│  │ 🔊 JBL Flip 6               ││
+│  │ [hifispeaker] JBL Flip 6    ││
 │  │ Bluetooth · Кімната          ││
 │  │ Остання гучність: 35%        ││
 │  │ ●───────○──────────── 35%    ││
 │  │                              ││
-│  │ [🟢 Підключити безпечно]     ││
+│  │ [● Підключити безпечно]      ││
+│  │   (зелений колір)            ││
 │  └─────────────────────────────┘│
 │                                  │
 │  ┌─────────────────────────────┐│
-│  │ 📺 Samsung TV                ││
+│  │ [tv] Samsung TV              ││
 │  │ AirPlay · Вітальня           ││
 │  │ Остання гучність: 72%        ││
 │  │ ●──────────────○──── 72%     ││
-│  │ ⚠️ УВАГА: Висока гучність   ││
-│  │ [🟡 Підключити з обережністю]││
+│  │ [exclamationmark.triangle]   ││
+│  │ УВАГА: Висока гучність       ││
+│  │ [● Підключити з обережністю] ││
+│  │   (жовтий колір)             ││
 │  └─────────────────────────────┘│
 │                                  │
-│  🌙 Нічний режим: УВІМК (22:00) │
-│  📊 Макс. поріг: 40%            │
+│  [moon.fill] Нічний режим: УВІМК│
+│  [chart.bar] Макс. поріг: 40%   │
 └─────────────────────────────────┘
 ```
 
@@ -243,26 +254,28 @@ SafeVolumeHandoff/
 ```
 ┌─────────────────────────────────┐
 │        Підключити до            │
-│      🔊 JBL Flip 6?            │
+│    [hifispeaker] JBL Flip 6?    │
 │                                  │
 │  Поточна гучність пристрою:     │
 │  ●────────○────────────── 35%   │
 │                                  │
-│  🟢 Безпечний рівень            │
+│  [checkmark.shield] Безпечний   │
 │                                  │
-│  ⏱ Fade-in: 2 секунди           │
-│  🌙 Нічний режим: увімк         │
-│  📊 Макс. поріг: 40%            │
+│  [timer] Fade-in: 2 секунди     │
+│  [moon.fill] Нічний режим: увімк│
+│  [chart.bar] Макс. поріг: 40%   │
 │                                  │
 │  ┌─────────────────────────────┐│
-│  │   ✅ Підключити безпечно     ││
+│  │ [checkmark] Підключити      ││
+│  │           безпечно           ││
 │  └─────────────────────────────┘│
 │                                  │
 │         Скасувати               │
 └─────────────────────────────────┘
 ```
 
-### 5. ⚙️ Налаштування (Settings Tab)
+### 5. Налаштування (Settings Tab)
+**SF Symbol**: `gearshape.fill`
 - **Нічний режим**: увімк/вимк, час активації (напр. 22:00–08:00)
 - **Fade-in**: тривалість (0.5с – 5с), увімк/вимк
 - **Максимальний поріг**: % при першому підключенні
@@ -271,27 +284,68 @@ SafeVolumeHandoff/
 
 ---
 
-## 7 Ключових Safe Volume Handoff Функцій
+## SF Symbols — Довідник іконок для додатку
 
-### 1. 🎚️ Попередній перегляд гучності
+| Елемент | SF Symbol |
+|---|---|
+| Таб Головна | `music.note.house.fill` |
+| Таб Пошук | `magnifyingglass` |
+| Таб Пристрої | `hifispeaker.2.fill` |
+| Таб Налаштування | `gearshape.fill` |
+| Play | `play.fill` |
+| Pause | `pause.fill` |
+| Skip Forward | `forward.fill` |
+| Skip Back | `backward.fill` |
+| Гучність (тиха) | `speaker.fill` |
+| Гучність (гучна) | `speaker.wave.3.fill` |
+| Безпечний рівень | `checkmark.shield.fill` |
+| Увага | `exclamationmark.triangle.fill` |
+| Небезпечний рівень | `xmark.shield.fill` |
+| Нічний режим | `moon.fill` |
+| Fade-in | `waveform.path.ecg` |
+| Bluetooth | `wave.3.right` |
+| AirPlay | `airplayaudio` |
+| iPhone | `iphone` |
+| Колонка | `hifispeaker.fill` |
+| TV | `tv.fill` |
+| Пошук | `magnifyingglass` |
+| Плейлист | `list.bullet` |
+| Серце (вподобати) | `heart.fill` |
+| Таймер | `timer` |
+| Поріг гучності | `chart.bar.fill` |
+
+---
+
+## 6 Ключових Safe Volume Handoff Функцій
+
+### 1. Попередній перегляд гучності
+**SF Symbol**: `speaker.wave.2.fill`
+
 Показує повзунок гучності цільового пристрою **ДО** підключення в картці пристрою. Дозволяє відрегулювати рівень до початку відтворення.
 
-### 2. 📈 Fade-in за замовчуванням
+### 2. Fade-in за замовчуванням
+**SF Symbol**: `waveform.path.ecg`
+
 Плавне наростання звуку при перемиканні — від 0% до обраного рівня за налаштовуваний час (0.5с — 5с).
 
-### 3. 🔴 Аварійна кнопка STOP
-Велика червона кнопка на екрані плеєра — миттєва зупинка всього аудіо в один клік. Ніяких меню, ніяких підтверджень.
+### 3. Максимальний поріг гучності
+**SF Symbol**: `chart.bar.fill`
 
-### 4. 📊 Максимальний поріг гучності
 Налаштовуваний ліміт максимальної гучності при першому підключенні (напр. 40%). Якщо пристрій запам'ятав 80%, додаток не дозволить стартувати вище порогу.
 
-### 5. 🌙 Night Mode (Нічний режим)
+### 4. Night Mode (Нічний режим)
+**SF Symbol**: `moon.fill`
+
 Автоматично вмикається у вечірній/нічний час. Зменшує максимально допустиму гучність (напр. до 30%), додає обов'язковий fade-in.
 
-### 6. ✅ Діалог підтвердження
-Перед підключенням показується картка пристрою з його ім'ям, кімнатою, рівнем гучності та кнопкою «Підключити безпечно». Колір кнопки залежить від безпеки рівня (🟢🟡🔴).
+### 5. Діалог підтвердження
+**SF Symbol**: `checkmark.shield.fill`
 
-### 7. 📋 Історія пристроїв
+Перед підключенням показується картка пристрою з його ім'ям, кімнатою, рівнем гучності та кнопкою «Підключити безпечно». Колір кнопки залежить від безпеки рівня (зелений / жовтий / червоний).
+
+### 6. Історія пристроїв
+**SF Symbol**: `clock.arrow.circlepath`
+
 Запам'ятовує переважний рівень гучності для кожного пристрою. Наприклад: «JBL Flip 6 → зазвичай 35%», «Samsung TV → зазвичай 25% ввечері».
 
 ---
@@ -307,81 +361,103 @@ SafeVolumeHandoff/
 | Фон карток | Графіт | `#242430` |
 | Текст основний | Білий | `#F5F5F7` |
 | Текст вторинний | Сірий | `#8E8E93` |
-| Акцент (безпечно) | Червоно-оранжевий | `#FF6B35` |
+| Акцент (основний) | Червоно-оранжевий | `#FF6B35` |
 | Акцент hover | Яскравий оранж | `#FF8C42` |
 | Безпечний рівень | Зелений | `#34C759` |
 | Увага (середній) | Жовтий | `#FFD60A` |
 | Небезпечний рівень | Червоний | `#FF3B30` |
-| STOP кнопка | Яскраво-червоний | `#FF2D55` |
 
 > [!IMPORTANT]
 > Всі кольори визначаються через `ThemeManager` і легко змінюються в одному місці!
 
 ---
 
-## Jamendo API Інтеграція
+## Spotify Web API Інтеграція
 
-[Jamendo](https://developer.jamendo.com/) — безкоштовний API для прослуховування ліцензованої музики (Creative Commons).
+[Spotify Web API](https://developer.spotify.com/documentation/web-api) — офіційний API для доступу до каталогу Spotify.
 
-**Можливості**:
-- Пошук треків за назвою/виконавцем/жанром
-- Повне прослуховування (не preview!)
-- Обкладинки альбомів
-- Безкоштовно для некомерційних проєктів
+**Переваги**:
+- Якісні обкладинки альбомів (640x640, 300x300, 64x64)
+- Повний каталог Spotify (мільйони треків)
+- Пошук за назвою / виконавцем / альбомом / жанром
+- Метадані треків (тривалість, популярність, дата релізу)
+- Рекомендації та нові релізи
+- Безкоштовна реєстрація на [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
 
-**API Endpoints**:
+**Обмеження**:
+- 30-секундні прев'ю (preview_url) замість повних треків
+- Не всі треки мають preview_url
+- Rate limit: ~180 запитів/хвилину
+
+**Автентифікація**: Client Credentials Flow (без логіну користувача)
 ```
-GET https://api.jamendo.com/v3.0/tracks/?client_id=YOUR_ID&search=query
-GET https://api.jamendo.com/v3.0/tracks/?client_id=YOUR_ID&tags=rock
-GET https://api.jamendo.com/v3.0/albums/?client_id=YOUR_ID
+POST https://accounts.spotify.com/api/token
+  grant_type=client_credentials
+  client_id=YOUR_CLIENT_ID
+  client_secret=YOUR_CLIENT_SECRET
 ```
+
+**Основні API Endpoints**:
+```
+GET https://api.spotify.com/v1/search?q=query&type=track&limit=20
+GET https://api.spotify.com/v1/tracks/{id}
+GET https://api.spotify.com/v1/browse/new-releases
+GET https://api.spotify.com/v1/browse/categories
+GET https://api.spotify.com/v1/recommendations?seed_genres=rock
+```
+
+**Як отримати Client ID (безкоштовно)**:
+1. Зайти на [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
+2. Створити новий App
+3. Скопіювати Client ID та Client Secret
+4. Вставити в `SpotifyAuthService.swift`
 
 ---
 
 ## Етапи Розробки
 
 ### Фаза 1: Фундамент (Тиждень 1)
-- [ ] Створити Xcode проєкт
-- [ ] Налаштувати структуру папок
-- [ ] Реалізувати `ThemeManager` з палітрою кольорів
-- [ ] Базовий `TabView` з 4 табами
-- [ ] Моделі даних (`Track`, `AudioDevice`, `Playlist`)
+- [x] Створити Xcode проєкт
+- [x] Налаштувати структуру папок
+- [x] Реалізувати `ThemeManager` з палітрою кольорів
+- [x] Базовий `TabView` з 4 табами (Головна, Пошук, Пристрої, Налаштування)
+- [x] Моделі даних (`Track`, `AudioDevice`, `Playlist`, `SpotifyModels`)
 
-### Фаза 2: Аудіо-движок (Тиждень 1-2)
-- [ ] `AudioEngine` — базове відтворення (AVAudioPlayer / AVPlayer)
-- [ ] Інтеграція з MediaPlayer framework (Now Playing info)
-- [ ] `FadeInEngine` — плавне наростання гучності
-- [ ] `SafeVolumeManager` — логіка перевірки рівня безпеки
+### Фаза 2: Spotify та Аудіо (Тиждень 1-2)
+- [x] `SpotifyAuthService` — Client Credentials flow
+- [x] `SpotifyAPIService` — пошук, нові релізи, рекомендації
+- [x] `AudioEngine` — відтворення 30с прев'ю через AVPlayer
+- [x] `FadeInEngine` — плавне наростання гучності
+- [x] `SafeVolumeManager` — логіка перевірки рівня безпеки
 
-### Фаза 3: Бібліотека та Плеєр (Тиждень 2)
-- [ ] Екран бібліотеки (MPMediaLibrary)
-- [ ] Міні-плеєр
-- [ ] Повноекранний плеєр з адаптивним фоном
-- [ ] Анімація переходу міні→повний плеєр
-- [ ] Аварійна кнопка STOP
+### Фаза 3: UI Головна та Пошук (Тиждень 2)
+- [x] Екран Головна (нові релізи, категорії, плейлисти)
+- [x] Екран Пошук (поле вводу, результати, обкладинки)
+- [x] Міні-плеєр
+- [x] Повноекранний плеєр з адаптивним фоном
+- [x] Анімація переходу міні → повний плеєр
 
 ### Фаза 4: Safe Volume Handoff (Тиждень 3)
-- [ ] Виявлення AirPlay-пристроїв
-- [ ] Виявлення Bluetooth-пристроїв
-- [ ] Екран пристроїв з картками
-- [ ] Попередній перегляд гучності
-- [ ] Діалог підтвердження підключення
-- [ ] Історія пристроїв (SwiftData)
-- [ ] Кольорова індикація рівня безпеки
+- [x] Виявлення AirPlay-пристроїв
+- [x] Виявлення Bluetooth-пристроїв
+- [x] Екран пристроїв з картками
+- [x] Попередній перегляд гучності
+- [x] Діалог підтвердження підключення
+- [x] Історія пристроїв
+- [x] Кольорова індикація рівня безпеки
 
 ### Фаза 5: Розширений функціонал (Тиждень 3-4)
-- [ ] Night Mode з автоматичним розкладом
-- [ ] Максимальний поріг гучності
-- [ ] Екран налаштувань
-- [ ] Jamendo API інтеграція
-- [ ] Онлайн-каталог з пошуком
-- [ ] Плейлисти
+- [x] Night Mode з автоматичним розкладом
+- [x] Максимальний поріг гучності
+- [x] Екран налаштувань
+- [x] Історія пристроїв та рекомендації
+- [x] Плейлисти (створення та збереження вподобаних треків)
 
 ### Фаза 6: Полірування (Тиждень 4)
-- [ ] Адаптивний фон на основі обкладинки
-- [ ] Мікро-анімації та переходи
-- [ ] Тестування на фізичному iPhone
-- [ ] Виправлення багів
+- [x] Адаптивний фон на основі обкладинки
+- [x] Мікро-анімації та переходи (AnimatedWaveform, GlowingButton, fadeInTransition)
+- [x] Тестування на фізичному iPhone / iOS Simulator
+- [x] Повна оптимізація та Swift 6 strict concurrency
 
 ---
 
@@ -393,6 +469,5 @@ GET https://api.jamendo.com/v3.0/albums/?client_id=YOUR_ID
 |---|---|---|
 | П2: Страх раптового звуку | R1: *«Вагаюся або відмовляюся вмикати колонку»* | Night Mode + Fade-in |
 | П9: Немає контролю до підключення | R3: *«На телефоні зменшую гучність»* | Попередній перегляд гучності |
-| Патерн екстреної зупинки | R3: *«Відразу поставила на паузу»* | Аварійна кнопка STOP |
 | Хибний workaround | R3: Скручує звук телефону, думаючи це вплине на колонку | Діалог з реальною гучністю пристрою |
 | Радикальні методи при збої | R1: *«Виключав та включав блютуз»* | Чітка кнопка від'єднання |
