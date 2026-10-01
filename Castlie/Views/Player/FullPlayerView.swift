@@ -173,10 +173,11 @@ struct FullPlayerView: View {
                 }
                 HapticFeedbackService.light()
             } label: {
-                Image(systemName: discovery.currentDevice?.type.sfSymbol ?? "airplayaudio")
+                let isRemote = CastlieConnectService.shared.activeRemoteDevice != nil
+                Image(systemName: isRemote ? "laptopcomputer" : (discovery.currentDevice?.type.sfSymbol ?? "airplayaudio"))
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(
-                        (discovery.currentDevice?.type != .iPhone && discovery.currentDevice != nil)
+                        isRemote || (discovery.currentDevice?.type != .iPhone && discovery.currentDevice != nil)
                         ? ThemeManager.shared.accent
                         : ThemeManager.shared.secondaryText
                     )
@@ -235,19 +236,22 @@ struct FullPlayerView: View {
             }
             HapticFeedbackService.light()
         } label: {
+            let activeRemote = CastlieConnectService.shared.activeRemoteDevice
+            let isRemote = activeRemote != nil
+            
             HStack(spacing: 8) {
-                Image(systemName: discovery.currentDevice?.type.sfSymbol ?? "speaker.wave.2.fill")
+                Image(systemName: isRemote ? "laptopcomputer" : (discovery.currentDevice?.type.sfSymbol ?? "speaker.wave.2.fill"))
                     .font(.callout)
                     .foregroundStyle(
-                        (discovery.currentDevice?.type != .iPhone && discovery.currentDevice != nil)
+                        isRemote || (discovery.currentDevice?.type != .iPhone && discovery.currentDevice != nil)
                         ? ThemeManager.shared.accent
                         : ThemeManager.shared.secondaryText
                     )
                 
-                Text("Грає на: \(discovery.currentDevice?.name ?? "Цей iPhone")")
+                Text(isRemote ? "Грає на: \(activeRemote?.name ?? "Mac")" : "Грає на: \(discovery.currentDevice?.name ?? "Цей iPhone")")
                     .font(.system(.caption, design: .rounded, weight: .medium))
                     .foregroundStyle(
-                        (discovery.currentDevice?.type != .iPhone && discovery.currentDevice != nil)
+                        isRemote || (discovery.currentDevice?.type != .iPhone && discovery.currentDevice != nil)
                         ? ThemeManager.shared.accent
                         : ThemeManager.shared.primaryText
                     )

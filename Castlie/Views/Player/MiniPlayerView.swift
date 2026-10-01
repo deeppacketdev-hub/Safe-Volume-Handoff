@@ -93,10 +93,11 @@ struct MiniPlayerView: View {
                 showDevicesSheet = true
                 HapticFeedbackService.light()
             } label: {
-                Image(systemName: discovery.currentDevice?.type.sfSymbol ?? "airplayaudio")
+                let isRemote = CastlieConnectService.shared.activeRemoteDevice != nil
+                Image(systemName: isRemote ? "laptopcomputer" : (discovery.currentDevice?.type.sfSymbol ?? "airplayaudio"))
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(
-                        (discovery.currentDevice?.type != .iPhone && discovery.currentDevice != nil)
+                        isRemote || (discovery.currentDevice?.type != .iPhone && discovery.currentDevice != nil)
                         ? ThemeManager.shared.accent
                         : ThemeManager.shared.secondaryText
                     )

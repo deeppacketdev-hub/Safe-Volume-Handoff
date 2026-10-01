@@ -246,6 +246,14 @@ wss.on('connection', (ws, req) => {
         break;
       }
 
+      case 'track_ended': {
+        broadcastToRoom(currentRoomId, {
+          type: 'track_ended',
+          deviceId: currentDeviceId
+        }, clientWs);
+        break;
+      }
+
       case 'ping': {
         clientWs.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
         break;

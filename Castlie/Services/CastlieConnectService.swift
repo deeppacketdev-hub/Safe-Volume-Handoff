@@ -28,6 +28,9 @@ final class CastlieConnectService: NSObject {
     private(set) var isConnecting: Bool = false
     private(set) var availableReceivers: [CastlieRemoteDevice] = []
     
+    // Активний віддалений пристрій (Mac), на який зараз транслюється аудіо
+    var activeRemoteDevice: CastlieRemoteDevice? = nil
+    
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?
     private var pingTimer: Timer?
@@ -130,11 +133,33 @@ final class CastlieConnectService: NSObject {
         send(json: payload)
     }
     
+    /// Підключитись до віддаленого Mac для постійного стрімінгу
+    func connectToRemote(device: CastlieRemoteDevice) {
+        self.activeRemoteDevice = device
+        AudioEngine.shared.updateVolumeFromRemote(device.volume)
+    }
+    
+    /// Відключитись від активного Mac і повернути звук на iPhone
+    func disconnectActiveRemote() {
+        guard let active = activeRemoteDevice else { return }
+        sendPlaybackCommand(deviceId: active.id, action: "stop")
+        activeRemoteDevice = nil
+        if let idx = availableReceivers.firstIndex(where: { $0.id == active.id }) {
+            availableReceivers[idx].isPlaying = false
+            availableReceivers[idx].connectedUser = nil
+        }
+        AudioEngine.shared.handleRemoteDisconnected()
+    }
+
     /// Оптимістичне оновлення стану для швидкого відгуку UI
     func markReceiverAsPlaying(deviceId: String, volume: Float) {
         if let idx = availableReceivers.firstIndex(where: { $0.id == deviceId }) {
             availableReceivers[idx].isPlaying = true
             availableReceivers[idx].volume = volume
+        }
+        if activeRemoteDevice?.id == deviceId {
+            activeRemoteDevice?.isPlaying = true
+            activeRemoteDevice?.volume = volume
         }
     }
     
@@ -145,6 +170,9 @@ final class CastlieConnectService: NSObject {
         if let idx = availableReceivers.firstIndex(where: { $0.id == deviceId }) {
             availableReceivers[idx].volume = clamped
         }
+        if activeRemoteDevice?.id == deviceId {
+            activeRemoteDevice?.volume = clamped
+        }
         
         let payload: [String: Any] = [
             "type": "volume_update",
@@ -154,13 +182,16 @@ final class CastlieConnectService: NSObject {
         send(json: payload)
     }
     
-    /// Керування відтворенням на Mac (Play / Pause / Toggle)
-    func sendPlaybackCommand(deviceId: String, action: String) {
-        let payload: [String: Any] = [
+    /// Керування відтворенням на Mac (Play / Pause / Toggle / Seek / Stop)
+    func sendPlaybackCommand(deviceId: String, action: String, value: Any? = nil) {
+        var payload: [String: Any] = [
             "type": "playback_command",
             "targetDeviceId": deviceId,
             "action": action
         ]
+        if let value {
+            payload["value"] = value
+        }
         send(json: payload)
     }
     
@@ -237,6 +268,13 @@ final class CastlieConnectService: NSObject {
                     }
                 }
                 self.availableReceivers = receivers
+                
+                // Якщо ми підключені до пристрою, синхронізуємо його поточні дані
+                if let active = self.activeRemoteDevice {
+                    if let updated = receivers.first(where: { $0.id == active.id }) {
+                        self.activeRemoteDevice = updated
+                    }
+                }
             }
             
         case "device_joined":
@@ -264,6 +302,10 @@ final class CastlieConnectService: NSObject {
         case "device_left":
             if let id = json["deviceId"] as? String {
                 availableReceivers.removeAll(where: { $0.id == id })
+                if activeRemoteDevice?.id == id {
+                    activeRemoteDevice = nil
+                    AudioEngine.shared.handleRemoteDisconnected()
+                }
             }
             
         case "volume_changed":
@@ -271,6 +313,10 @@ final class CastlieConnectService: NSObject {
                let newVol = (json["volume"] as? NSNumber)?.floatValue {
                 if let idx = availableReceivers.firstIndex(where: { $0.id == id }) {
                     availableReceivers[idx].volume = newVol
+                }
+                if activeRemoteDevice?.id == id {
+                    activeRemoteDevice?.volume = newVol
+                    AudioEngine.shared.updateVolumeFromRemote(newVol)
                 }
             }
             
@@ -284,6 +330,18 @@ final class CastlieConnectService: NSObject {
                         availableReceivers[idx].connectedUser = user
                     }
                 }
+                if activeRemoteDevice?.id == id {
+                    if let isPlay = json["isPlaying"] as? Bool {
+                        activeRemoteDevice?.isPlaying = isPlay
+                        AudioEngine.shared.updatePlaybackState(isPlaying: isPlay)
+                    }
+                }
+            }
+            
+        case "track_ended":
+            if let id = json["deviceId"] as? String, activeRemoteDevice?.id == id {
+                print("[CastlieConnect] ⏭️ Remote Mac track ended, advancing to next song")
+                AudioEngine.shared.playNext(autoAdvance: true)
             }
             
         default:

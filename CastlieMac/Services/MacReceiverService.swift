@@ -212,17 +212,50 @@ final class MacReceiverService: NSObject {
         case "remote_playback_command":
             if let action = json["action"] as? String {
                 switch action {
-                case "toggle": audioPlayer.togglePlayPause()
-                case "pause": audioPlayer.pause()
-                case "play": audioPlayer.resume()
-                case "stop": audioPlayer.stop()
-                default: break
+                case "toggle": 
+                    audioPlayer.togglePlayPause()
+                case "pause": 
+                    audioPlayer.pause()
+                case "play": 
+                    audioPlayer.resume()
+                case "stop", "disconnect": 
+                    audioPlayer.stop()
+                    self.currentTrack = nil
+                    self.connectedUser = nil
+                    self.send(json: [
+                        "type": "playback_state",
+                        "deviceId": self.deviceId,
+                        "isPlaying": false,
+                        "currentTrack": NSNull(),
+                        "connectedUser": NSNull()
+                    ])
+                case "seek":
+                    if let sec = (json["value"] as? NSNumber)?.doubleValue {
+                        audioPlayer.seek(to: sec)
+                    }
+                default: 
+                    break
                 }
             }
             
         default:
             break
         }
+    }
+    
+    /// Сповіщення сервера про закінчення пісні на Mac для автоперемикання
+    func notifyTrackEnded() {
+        print("[MacReceiver] ⏹️ Track ended on Mac, notifying room")
+        send(json: [
+            "type": "track_ended",
+            "deviceId": deviceId
+        ])
+        send(json: [
+            "type": "playback_state",
+            "deviceId": deviceId,
+            "isPlaying": false,
+            "connectedUser": connectedUser as Any
+        ])
     }
     
     private func handleDisconnect() {

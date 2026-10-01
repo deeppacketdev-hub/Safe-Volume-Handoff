@@ -61,6 +61,7 @@ final class MacAudioPlayer {
             Task { @MainActor in
                 self?.isPlaying = false
                 self?.currentTime = 0
+                MacReceiverService.shared.notifyTrackEnded()
             }
         }
         
@@ -116,6 +117,12 @@ final class MacAudioPlayer {
         } else {
             resume()
         }
+    }
+    
+    func seek(to seconds: Double) {
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+        player?.seek(to: time)
+        currentTime = seconds
     }
     
     func stop() {

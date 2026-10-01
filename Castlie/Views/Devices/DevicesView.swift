@@ -9,10 +9,8 @@ struct DevicesView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    // MARK: - 1. Поточний звук (Цей пристрій)
-                    if let current = viewModel.discovery.currentDevice {
-                        currentDeviceSection(current: current)
-                    }
+                    // MARK: - 1. Поточний звук (Цей пристрій або підключений Mac)
+                    currentDeviceSection
                     
                     // MARK: - 2. ПРІОРИТЕТ №1: Castlie Connect
                     castlieConnectSection
@@ -56,15 +54,27 @@ struct DevicesView: View {
     // MARK: - Subviews
     
     @ViewBuilder
-    private func currentDeviceSection(current: AudioDevice) -> some View {
+    private var currentDeviceSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Поточний вивід")
                 .font(AppFonts.caption)
                 .foregroundStyle(ThemeManager.shared.secondaryText)
                 .padding(.horizontal, 4)
             
-            CurrentDeviceCard(device: current) {
-                viewModel.initiateHandoff(to: current)
+            if let activeRemote = viewModel.connectService.activeRemoteDevice {
+                ActiveRemoteCurrentDeviceCard(
+                    remote: activeRemote,
+                    onDisconnect: {
+                        viewModel.disconnectActiveRemote()
+                    },
+                    onVolumeChange: { newVol in
+                        viewModel.connectService.setRemoteVolume(deviceId: activeRemote.id, volume: newVol)
+                    }
+                )
+            } else if let current = viewModel.discovery.currentDevice {
+                CurrentDeviceCard(device: current) {
+                    viewModel.initiateHandoff(to: current)
+                }
             }
         }
     }
@@ -78,25 +88,6 @@ struct DevicesView: View {
                     .foregroundStyle(ThemeManager.shared.primaryText)
                 
                 Spacer()
-                
-                Button {
-                    serverDomainInput = viewModel.connectService.serverDomain
-                    showServerSettings = true
-                } label: {
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(viewModel.connectService.isConnected ? Color.green : Color.orange)
-                            .frame(width: 7, height: 7)
-                        Text(viewModel.connectService.isConnected ? "Онлайн" : "Підключення")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(ThemeManager.shared.secondaryText)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(ThemeManager.shared.cardBackground)
-                    .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 4)
             
@@ -105,16 +96,16 @@ struct DevicesView: View {
                 HStack(spacing: 14) {
                     Image(systemName: "laptopcomputer")
                         .font(.title2)
-                        .foregroundStyle(ThemeManager.shared.accent.opacity(0.8))
+                        .foregroundStyle(ThemeManager.shared.secondaryText.opacity(0.6))
                         .frame(width: 40, height: 40)
-                        .background(ThemeManager.shared.accent.opacity(0.1))
+                        .background(ThemeManager.shared.cardBackground)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                     
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Очікування Mac у мережі")
+                        Text("Не знайдено пристроїв у мережі")
                             .font(AppFonts.subheadline)
                             .foregroundStyle(ThemeManager.shared.primaryText)
-                        Text("Запустіть Castlie Connect на комп'ютері")
+                        Text("Переконайтеся, що Castlie Connect запущено на Mac")
                             .font(AppFonts.caption)
                             .foregroundStyle(ThemeManager.shared.secondaryText)
                     }
@@ -124,10 +115,15 @@ struct DevicesView: View {
             } else {
                 VStack(spacing: 12) {
                     ForEach(receivers) { remote in
+                        let isConnected = viewModel.connectService.activeRemoteDevice?.id == remote.id
                         CastlieRemoteDeviceCard(
                             remote: remote,
+                            isActiveRemote: isConnected,
                             onHandoff: {
                                 viewModel.initiateRemoteHandoff(to: remote)
+                            },
+                            onDisconnect: {
+                                viewModel.disconnectActiveRemote()
                             },
                             onVolumeChange: { newVol in
                                 viewModel.connectService.setRemoteVolume(deviceId: remote.id, volume: newVol)
@@ -229,11 +225,11 @@ struct SavedBluetoothRow: View {
     }
 }
 
-// MARK: - Castlie Connect Remote Device Card (Чистий дизайн)
+// MARK: - Active Remote Current Device Card (Mac як активний вивід)
 
-struct CastlieRemoteDeviceCard: View {
+struct ActiveRemoteCurrentDeviceCard: View {
     let remote: CastlieRemoteDevice
-    let onHandoff: () -> Void
+    let onDisconnect: () -> Void
     let onVolumeChange: (Float) -> Void
     
     @State private var safeVolume = SafeVolumeManager.shared
@@ -246,7 +242,92 @@ struct CastlieRemoteDeviceCard: View {
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(ThemeManager.shared.accent.opacity(0.12))
+                        .fill(ThemeManager.shared.accent.opacity(0.18))
+                        .frame(width: 42, height: 42)
+                    Image(systemName: "laptopcomputer")
+                        .font(.title3)
+                        .foregroundStyle(ThemeManager.shared.accent)
+                }
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(remote.name)
+                        .font(AppFonts.headline)
+                        .foregroundStyle(ThemeManager.shared.primaryText)
+                    
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                        Text("\(volPercent)% • Castlie Connect • Активний")
+                            .font(AppFonts.caption)
+                            .foregroundStyle(ThemeManager.shared.accent)
+                    }
+                }
+                
+                Spacer()
+                
+                Button {
+                    onDisconnect()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "eject.fill")
+                            .font(.system(size: 10))
+                        Text("Відключити")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(Color(hex: "FF3B30"))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color(hex: "FF3B30").opacity(0.12))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            
+            // Живий повзунок гучності Mac у реальному часі
+            HStack(spacing: 10) {
+                Image(systemName: "speaker.fill")
+                    .font(.caption2)
+                    .foregroundStyle(ThemeManager.shared.secondaryText)
+                
+                Slider(
+                    value: Binding(
+                        get: { remote.volume },
+                        set: { onVolumeChange($0) }
+                    ),
+                    in: 0...1
+                )
+                .tint(safetyColor)
+                
+                Image(systemName: "speaker.wave.3.fill")
+                    .font(.caption2)
+                    .foregroundStyle(ThemeManager.shared.secondaryText)
+            }
+        }
+        .cardStyle()
+    }
+}
+
+// MARK: - Castlie Connect Remote Device Card (Чистий дизайн)
+
+struct CastlieRemoteDeviceCard: View {
+    let remote: CastlieRemoteDevice
+    var isActiveRemote: Bool = false
+    let onHandoff: () -> Void
+    var onDisconnect: () -> Void = {}
+    let onVolumeChange: (Float) -> Void
+    
+    @State private var safeVolume = SafeVolumeManager.shared
+    
+    var body: some View {
+        let volPercent = Int(remote.volume * 100)
+        let safetyColor = safeVolume.safetyLevel(for: remote.volume).color
+        
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(isActiveRemote ? ThemeManager.shared.accent.opacity(0.2) : ThemeManager.shared.accent.opacity(0.12))
                         .frame(width: 44, height: 44)
                     Image(systemName: "laptopcomputer")
                         .font(.title3)
@@ -260,11 +341,11 @@ struct CastlieRemoteDeviceCard: View {
                     
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(Color.green)
+                            .fill(isActiveRemote ? ThemeManager.shared.accent : Color.green)
                             .frame(width: 6, height: 6)
-                        Text("Онлайн (Castlie Connect)")
+                        Text(isActiveRemote ? "Підключено (Активний вивід)" : "Онлайн (Castlie Connect)")
                             .font(AppFonts.caption2)
-                            .foregroundStyle(Color.green)
+                            .foregroundStyle(isActiveRemote ? ThemeManager.shared.accent : Color.green)
                     }
                 }
                 
@@ -296,25 +377,46 @@ struct CastlieRemoteDeviceCard: View {
                     .foregroundStyle(ThemeManager.shared.secondaryText)
             }
             
-            // Кнопка передачі звуку з Safe Handoff
-            Button {
-                onHandoff()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: remote.isPlaying ? "waveform" : "checkmark.shield.fill")
-                    Text(remote.isPlaying ? "Грає на Mac (Змінити звук)" : "Безпечна передача (Safe Handoff)")
+            // Кнопка: "Підключитись" або "Відключитись" залежно від поточного стану
+            if isActiveRemote {
+                Button {
+                    onDisconnect()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "xmark.circle.fill")
+                        Text("Відключитись")
+                    }
+                    .font(AppFonts.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color(hex: "FF3B30"))
+                    )
                 }
-                .font(AppFonts.subheadline)
-                .fontWeight(.semibold)
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(ThemeManager.shared.accent)
-                )
+                .buttonStyle(.plain)
+            } else {
+                Button {
+                    onHandoff()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.shield.fill")
+                        Text("Підключитись (Safe Handoff)")
+                    }
+                    .font(AppFonts.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(ThemeManager.shared.accent)
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .cardStyle()
     }

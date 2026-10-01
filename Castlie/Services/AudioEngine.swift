@@ -39,6 +39,8 @@ class AudioEngine {
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
+    private var isReceivingRemoteVolumeUpdate: Bool = false
+    private var lastAutoAdvanceTime: Date = .distantPast
     
     private init() {
         setupAudioSession()
@@ -295,52 +297,79 @@ class AudioEngine {
             }
             
             self.currentAudioURL = previewURL
-            let playerItem = AVPlayerItem(url: previewURL)
-            let newPlayer = AVPlayer(playerItem: playerItem)
-            newPlayer.volume = self.volume
-            self.player = newPlayer
             
-            // Підписка на закінчення треку
-            self.endObserver = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime,
-                object: playerItem,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor in
-                    guard let self else { return }
-                    if self.repeatMode == .one {
-                        self.seek(to: 0)
-                        self.player?.play()
-                        self.isPlaying = true
-                        self.updateNowPlayingInfo()
-                    } else {
-                        self.playNext(autoAdvance: true)
-                    }
-                }
+            // ПЕРЕВІРКА: Якщо ми підключені до віддаленого Mac (Castlie Connect)
+            if let remote = CastlieConnectService.shared.activeRemoteDevice {
+                print("[AudioEngine] 📡 Persistent session active: Routing \(track.name) to Mac (\(remote.name))")
+                CastlieConnectService.shared.sendHandoff(
+                    to: remote.id,
+                    track: track,
+                    previewURL: previewURL,
+                    targetVolume: remote.volume,
+                    fadeInDuration: SafeVolumeManager.shared.config.fadeInDuration
+                )
+                // Запускаємо локальний приглушений плеєр (volume = 0)
+                // Це дозволяє перехоплювати фізичні кнопки гучності iPhone,
+                // синхронізувати таймлайн, скраббер і автоперемикання
+                self.setupPlayerItem(url: previewURL, isMutedForRemote: true)
+                self.prefetchNextTrack()
+                return
             }
             
-            // Підписка на оновлення прогресу (кожні 0.1 секунди)
-            self.timeObserver = newPlayer.addPeriodicTimeObserver(
-                forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
-                queue: .main
-            ) { [weak self] time in
-                Task { @MainActor in
-                    guard let self else { return }
-                    self.currentTime = time.seconds
-                    if let itemDuration = self.player?.currentItem?.duration.seconds,
-                       !itemDuration.isNaN && itemDuration > 0 && abs(self.duration - itemDuration) > 0.5 {
-                        self.duration = itemDuration
-                        self.updateNowPlayingInfo()
-                    }
-                }
-            }
-            
-            newPlayer.play()
-            self.updateNowPlayingInfo()
-            
-            // Фонове попереднє завантаження посилання наступного треку для миттєвого перемикання
+            // Звичайне локальне відтворення на динаміках iPhone
+            self.setupPlayerItem(url: previewURL, isMutedForRemote: false)
             self.prefetchNextTrack()
         }
+    }
+    
+    /// Налаштування AVPlayer для локального або фонового/дистанційного відтворення
+    private func setupPlayerItem(url: URL, isMutedForRemote: Bool) {
+        let playerItem = AVPlayerItem(url: url)
+        let newPlayer = AVPlayer(playerItem: playerItem)
+        newPlayer.volume = isMutedForRemote ? 0.0 : self.volume
+        self.player = newPlayer
+        
+        // Підписка на закінчення треку
+        self.endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.repeatMode == .one {
+                    self.seek(to: 0)
+                    self.player?.play()
+                    self.isPlaying = true
+                    if let remote = CastlieConnectService.shared.activeRemoteDevice {
+                        CastlieConnectService.shared.sendPlaybackCommand(deviceId: remote.id, action: "seek", value: 0)
+                        CastlieConnectService.shared.sendPlaybackCommand(deviceId: remote.id, action: "play")
+                    }
+                    self.updateNowPlayingInfo()
+                } else {
+                    self.playNext(autoAdvance: true)
+                }
+            }
+        }
+        
+        // Підписка на оновлення прогресу (кожні 0.1 секунди)
+        self.timeObserver = newPlayer.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] time in
+            Task { @MainActor in
+                guard let self else { return }
+                self.currentTime = time.seconds
+                if let itemDuration = self.player?.currentItem?.duration.seconds,
+                   !itemDuration.isNaN && itemDuration > 0 && abs(self.duration - itemDuration) > 0.5 {
+                    self.duration = itemDuration
+                    self.updateNowPlayingInfo()
+                }
+            }
+        }
+        
+        newPlayer.play()
+        self.updateNowPlayingInfo()
     }
     
     /// Фонове кешування наступного треку, щоб у фоні при блокуванні екрана треки перемикалися без затримок
@@ -366,6 +395,21 @@ class AudioEngine {
     
     /// Пауза / Продовження
     func togglePlayPause() {
+        if let remote = CastlieConnectService.shared.activeRemoteDevice {
+            if isPlaying {
+                player?.pause()
+                isPlaying = false
+                CastlieConnectService.shared.sendPlaybackCommand(deviceId: remote.id, action: "pause")
+            } else {
+                try? AVAudioSession.sharedInstance().setActive(true)
+                player?.play()
+                isPlaying = true
+                CastlieConnectService.shared.sendPlaybackCommand(deviceId: remote.id, action: "play")
+            }
+            updateNowPlayingInfo()
+            return
+        }
+        
         guard let player else { return }
         if isPlaying {
             player.pause()
@@ -420,6 +464,12 @@ class AudioEngine {
     func playNext(autoAdvance: Bool = false) {
         guard !queue.isEmpty else { return }
         
+        if autoAdvance {
+            let now = Date()
+            guard now.timeIntervalSince(lastAutoAdvanceTime) > 1.2 else { return }
+            lastAutoAdvanceTime = now
+        }
+        
         // Режим Shuffle: обираємо випадковий інший трек
         if isShuffled && queue.count > 1 {
             var nextIndex: Int
@@ -464,6 +514,9 @@ class AudioEngine {
         let time = CMTime(seconds: seconds, preferredTimescale: 600)
         player?.seek(to: time)
         currentTime = seconds
+        if let remote = CastlieConnectService.shared.activeRemoteDevice {
+            CastlieConnectService.shared.sendPlaybackCommand(deviceId: remote.id, action: "seek", value: seconds)
+        }
         updateNowPlayingInfo()
     }
     
@@ -471,15 +524,57 @@ class AudioEngine {
     func setVolume(_ newVolume: Float) {
         let clamped = max(0, min(1, newVolume))
         volume = clamped
-        player?.volume = clamped
-        SystemVolumeController.shared.setSystemVolume(clamped)
+        
+        if let remote = CastlieConnectService.shared.activeRemoteDevice {
+            player?.volume = 0
+            CastlieConnectService.shared.setRemoteVolume(deviceId: remote.id, volume: clamped)
+            isReceivingRemoteVolumeUpdate = true
+            SystemVolumeController.shared.setSystemVolume(clamped)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.isReceivingRemoteVolumeUpdate = false
+            }
+        } else {
+            player?.volume = clamped
+            SystemVolumeController.shared.setSystemVolume(clamped)
+        }
     }
     
-    /// Синхронізація зі змінами апаратної системної гучності
+    /// Синхронізація зі змінами апаратної системної гучності (фізичні кнопки iPhone, Mac тощо)
     func syncSystemVolume(_ sysVolume: Float) {
+        guard !isReceivingRemoteVolumeUpdate else { return }
         let clamped = max(0, min(1, sysVolume))
         volume = clamped
-        player?.volume = clamped
+        
+        if let remote = CastlieConnectService.shared.activeRemoteDevice {
+            // REMOTE IS ACTIVE: Звук на динаміку iPhone приглушений (0), гучність передається на Mac в реальному часі!
+            player?.volume = 0
+            CastlieConnectService.shared.setRemoteVolume(deviceId: remote.id, volume: clamped)
+        } else {
+            player?.volume = clamped
+        }
+    }
+    
+    /// Безпечне оновлення гучності від віддаленого Mac без нескінченного циклу KVO
+    func updateVolumeFromRemote(_ newVolume: Float) {
+        let clamped = max(0, min(1, newVolume))
+        volume = clamped
+        isReceivingRemoteVolumeUpdate = true
+        SystemVolumeController.shared.setSystemVolume(clamped)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.isReceivingRemoteVolumeUpdate = false
+        }
+    }
+    
+    /// Відновлення нормальної локальної гучності після відключення Mac
+    func handleRemoteDisconnected() {
+        player?.volume = volume
+        SystemVolumeController.shared.setSystemVolume(volume)
+    }
+    
+    /// Оновлення стану відтворення від віддаленого пристрою
+    func updatePlaybackState(isPlaying: Bool) {
+        self.isPlaying = isPlaying
+        updateNowPlayingInfo()
     }
     
     // MARK: - Now Playing Info (Lock Screen & Dynamic Island)

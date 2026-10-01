@@ -60,36 +60,16 @@ class DeviceManagerViewModel {
                 volume: targetVol
             )
             
-            // Якщо на телефоні вибрано або грає трек (або є в черзі)
+            // Встановлюємо стійке з'єднання із Mac
+            var updatedRemote = remote
+            updatedRemote.volume = targetVol
+            connectService.connectToRemote(device: updatedRemote)
+            connectService.setRemoteVolume(deviceId: remote.id, volume: targetVol)
+            
+            // Якщо на телефоні є трек (або в черзі), запускаємо його через AudioEngine
             let trackToPlay = audioEngine.currentTrack ?? audioEngine.queue.first
             if let track = trackToPlay {
-                // Оптимістично оновлюємо стан відтворення в UI
-                connectService.markReceiverAsPlaying(deviceId: remote.id, volume: targetVol)
-                
-                Task { @MainActor in
-                    let audioURL: URL?
-                    if let current = audioEngine.currentAudioURL {
-                        audioURL = current
-                    } else {
-                        audioURL = await audioEngine.resolveAudioURL(for: track)
-                    }
-                    
-                    connectService.sendHandoff(
-                        to: remote.id,
-                        track: track,
-                        previewURL: audioURL,
-                        targetVolume: targetVol,
-                        fadeInDuration: safeVolume.config.fadeInDuration
-                    )
-                }
-                
-                // Ставимо телефон на паузу, бо грає Mac
-                if audioEngine.isPlaying {
-                    audioEngine.togglePlayPause()
-                }
-            } else {
-                // Якщо трек не обрано, просто встановлюємо безпечну гучність на Mac
-                connectService.setRemoteVolume(deviceId: remote.id, volume: targetVol)
+                audioEngine.play(track: track)
             }
             
             HapticFeedbackService.success()
@@ -135,5 +115,11 @@ class DeviceManagerViewModel {
         showHandoffConfirm = false
         selectedDevice = nil
         selectedRemoteDevice = nil
+    }
+    
+    /// Відключитись від активного Mac і повернути звук на iPhone
+    func disconnectActiveRemote() {
+        connectService.disconnectActiveRemote()
+        HapticFeedbackService.light()
     }
 }
