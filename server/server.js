@@ -1,7 +1,7 @@
 const http = require('http');
 const { WebSocketServer, WebSocket } = require('ws');
 
-const PRIMARY_PORT = parseInt(process.env.PORT || '3000', 10);
+const PRIMARY_PORT = parseInt(process.env.PORT || '80', 10);
 const SECONDARY_PORT = PRIMARY_PORT === 80 ? 3000 : 80;
 
 // Device state store per room: Map<roomId, Map<deviceId, { ws, info }>>
