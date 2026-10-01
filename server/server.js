@@ -1,7 +1,8 @@
 const http = require('http');
 const { WebSocketServer, WebSocket } = require('ws');
 
-const PORT = process.env.PORT || 80;
+const PRIMARY_PORT = parseInt(process.env.PORT || '3000', 10);
+const SECONDARY_PORT = PRIMARY_PORT === 80 ? 3000 : 80;
 
 // Device state store per room: Map<roomId, Map<deviceId, { ws, info }>>
 const rooms = new Map();
@@ -29,8 +30,8 @@ function broadcastToRoom(roomId, message, excludeWs = null) {
   }
 }
 
-// 1. HTTP Server for Healthchecks & Status
-const server = http.createServer((req, res) => {
+// HTTP Request Handler (Healthchecks & Status)
+function requestHandler(req, res) {
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -72,17 +73,30 @@ const server = http.createServer((req, res) => {
 
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('Not Found');
-});
+}
 
-// 2. WebSocket Server
-const wss = new WebSocketServer({ server, path: '/ws' });
+// WebSocket Server (Standalone, bound to both HTTP listeners)
+const wss = new WebSocketServer({ noServer: true });
+
+function attachWsToHttp(server) {
+  server.on('upgrade', (req, socket, head) => {
+    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    if (url.pathname === '/ws') {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit('connection', ws, req);
+      });
+    } else {
+      socket.destroy();
+    }
+  });
+}
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const roomId = url.searchParams.get('roomId') || 'default';
   
   let currentDeviceId = null;
-  let currentRole = 'sender'; // 'receiver' (Mac) or 'sender' (iPhone)
+  let currentRole = 'sender';
   let currentRoomId = roomId;
 
   ws.isAlive = true;
@@ -105,7 +119,6 @@ wss.on('connection', (ws, req) => {
     const type = msg.type;
 
     switch (type) {
-      // 1. Device Registration (Mac or iPhone)
       case 'register': {
         currentDeviceId = msg.deviceId || `device_${Date.now()}`;
         currentRole = msg.role || 'sender';
@@ -125,20 +138,16 @@ wss.on('connection', (ws, req) => {
         };
 
         room.set(currentDeviceId, { ws: clientWs, info: deviceInfo });
+        console.log(`[Register] ${currentRole.toUpperCase()}: "${deviceInfo.name}" (${currentDeviceId}) in room: ${currentRoomId}`);
 
-        console.log(`[Register] ${currentRole.toUpperCase()}: "${deviceInfo.name}" (ID: ${currentDeviceId}) in room: ${currentRoomId}`);
-
-        // Acknowledge registration to sender
         clientWs.send(JSON.stringify({
           type: 'registered',
           deviceId: currentDeviceId,
           roomId: currentRoomId
         }));
 
-        // Send full list of active receivers to this client
         sendDevicesList(clientWs, currentRoomId);
 
-        // Notify other clients about this new/updated device
         broadcastToRoom(currentRoomId, {
           type: 'device_joined',
           device: deviceInfo
@@ -146,13 +155,11 @@ wss.on('connection', (ws, req) => {
         break;
       }
 
-      // 2. Request devices list
       case 'get_devices': {
         sendDevicesList(clientWs, currentRoomId);
         break;
       }
 
-      // 3. Live Volume Update (from Mac CoreAudio or iPhone slider)
       case 'volume_update': {
         const targetDeviceId = msg.targetDeviceId || currentDeviceId;
         const volume = Math.max(0, Math.min(1, Number(msg.volume)));
@@ -163,9 +170,6 @@ wss.on('connection', (ws, req) => {
           deviceEntry.info.volume = volume;
         }
 
-        console.log(`[Volume] Device ${targetDeviceId} volume set to ${Math.round(volume * 100)}%`);
-
-        // Broadcast to all clients in room
         broadcastToRoom(currentRoomId, {
           type: 'volume_changed',
           deviceId: targetDeviceId,
@@ -174,13 +178,12 @@ wss.on('connection', (ws, req) => {
         break;
       }
 
-      // 4. Safe Handoff Command (iPhone -> Mac)
       case 'handoff': {
         const targetDeviceId = msg.targetDeviceId;
         const room = getRoom(currentRoomId);
         const target = room.get(targetDeviceId);
 
-        console.log(`[Handoff] Initiating handoff to: ${targetDeviceId} (Track: "${msg.track?.name}", TargetVol: ${msg.targetVolume}, FadeIn: ${msg.fadeInDuration}s)`);
+        console.log(`[Handoff] Dispatching to: ${targetDeviceId}`);
 
         if (target && target.ws.readyState === WebSocket.OPEN) {
           target.ws.send(JSON.stringify({
@@ -192,7 +195,6 @@ wss.on('connection', (ws, req) => {
             fadeInDuration: msg.fadeInDuration || 2.0
           }));
 
-          // Notify sender of dispatch
           clientWs.send(JSON.stringify({
             type: 'handoff_dispatched',
             targetDeviceId: targetDeviceId,
@@ -208,7 +210,6 @@ wss.on('connection', (ws, req) => {
         break;
       }
 
-      // 5. Playback Controls (play/pause/seek)
       case 'playback_command': {
         const targetDeviceId = msg.targetDeviceId;
         const room = getRoom(currentRoomId);
@@ -224,7 +225,6 @@ wss.on('connection', (ws, req) => {
         break;
       }
 
-      // 6. Playback State Broadcast (Mac -> iPhone)
       case 'playback_state': {
         const room = getRoom(currentRoomId);
         const deviceEntry = room.get(currentDeviceId);
@@ -246,14 +246,13 @@ wss.on('connection', (ws, req) => {
         break;
       }
 
-      // 7. Ping / Heartbeat
       case 'ping': {
         clientWs.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
         break;
       }
 
       default:
-        console.log(`[WS] Unknown message type: ${type}`);
+        break;
     }
   }
 
@@ -269,9 +268,7 @@ wss.on('connection', (ws, req) => {
     }));
   }
 
-  // Handle client disconnect
   ws.on('close', () => {
-    console.log(`[Disconnect] Client disconnected: ${currentDeviceId || 'unregistered'}`);
     if (currentDeviceId && currentRoomId) {
       const room = rooms.get(currentRoomId);
       if (room) {
@@ -285,11 +282,11 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('error', (err) => {
-    console.error(`[WS Client Error] ${currentDeviceId}:`, err.message);
+    console.error(`[WS Error] ${currentDeviceId}:`, err.message);
   });
 });
 
-// Periodic ping/pong to clean up dead sockets (every 25 seconds)
+// Periodic ping/pong
 const heartbeatInterval = setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) {
@@ -304,13 +301,16 @@ wss.on('close', () => {
   clearInterval(heartbeatInterval);
 });
 
-// Start Server
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`===============================================`);
-  console.log(`  Castlie Connect Relay Server Running        `);
-  console.log(`  Domain: castlie.dron.lol                    `);
-  console.log(`  Port: ${PORT}                               `);
-  console.log(`  WebSocket Path: /ws                         `);
-  console.log(`  Healthcheck: http://0.0.0.0:${PORT}/health  `);
-  console.log(`===============================================`);
+// Start Primary Server
+const primaryServer = http.createServer(requestHandler);
+attachWsToHttp(primaryServer);
+primaryServer.listen(PRIMARY_PORT, '0.0.0.0', () => {
+  console.log(`[Castlie Relay] Primary listener on port ${PRIMARY_PORT}`);
+});
+
+// Start Secondary Server (guarantees both 80 and 3000 work seamlessly)
+const secondaryServer = http.createServer(requestHandler);
+attachWsToHttp(secondaryServer);
+secondaryServer.listen(SECONDARY_PORT, '0.0.0.0', () => {
+  console.log(`[Castlie Relay] Secondary listener on port ${SECONDARY_PORT}`);
 });
