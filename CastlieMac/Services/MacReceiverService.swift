@@ -145,42 +145,63 @@ final class MacReceiverService: NSObject {
         
         switch type {
         case "perform_handoff":
-            guard let trackData = json["track"] as? [String: Any],
-                  let previewURLString = trackData["previewURL"] as? String,
-                  let previewURL = URL(string: previewURLString) else { return }
+            guard let trackData = json["track"] as? [String: Any] else { return }
             
-            let track = RemoteTrackInfo(
-                id: trackData["id"] as? String ?? UUID().uuidString,
-                name: trackData["name"] as? String ?? "Track",
-                artistName: trackData["artistName"] as? String ?? "Artist",
-                albumName: trackData["albumName"] as? String,
-                albumArtURL: trackData["albumArtURL"] as? String,
-                previewURL: previewURLString
-            )
+            let trackId = trackData["id"] as? String ?? UUID().uuidString
+            let trackName = trackData["name"] as? String ?? "Track"
+            let artistName = trackData["artistName"] as? String ?? "Artist"
+            let albumName = trackData["albumName"] as? String
+            let albumArtURL = trackData["albumArtURL"] as? String
+            let previewURLString = trackData["previewURL"] as? String
             
             let targetVol = (json["targetVolume"] as? NSNumber)?.floatValue ?? 0.35
             let fadeIn = (json["fadeInDuration"] as? NSNumber)?.doubleValue ?? 2.0
             let sender = json["senderName"] as? String ?? "iPhone"
             
+            let track = RemoteTrackInfo(
+                id: trackId,
+                name: trackName,
+                artistName: artistName,
+                albumName: albumName,
+                albumArtURL: albumArtURL,
+                previewURL: previewURLString
+            )
+            
             self.currentTrack = track
             self.connectedUser = sender
             
-            // Execute Safe Handoff Playback
-            audioPlayer.play(url: previewURL, targetVolume: targetVol, fadeInDuration: fadeIn)
+            print("[MacReceiver] 🎵 Handoff received from \(sender): \"\(trackName)\" by \(artistName)")
             
-            // Broadcast updated playback state
-            send(json: [
-                "type": "playback_state",
-                "deviceId": deviceId,
-                "isPlaying": true,
-                "currentTrack": [
-                    "id": track.id,
-                    "name": track.name,
-                    "artistName": track.artistName,
-                    "albumArtURL": track.albumArtURL as Any
-                ],
-                "connectedUser": sender
-            ])
+            Task { @MainActor in
+                var finalURL: URL? = nil
+                if let previewURLString, let url = URL(string: previewURLString) {
+                    finalURL = url
+                } else {
+                    finalURL = await self.resolveAudioFallback(artist: artistName, track: trackName)
+                }
+                
+                guard let finalURL else {
+                    print("[MacReceiver] ❌ Could not find audio stream URL for \(trackName)")
+                    return
+                }
+                
+                print("[MacReceiver] ▶️ Playing \(trackName) with volume \(Int(targetVol * 100))% (fade-in: \(fadeIn)s)")
+                self.audioPlayer.play(url: finalURL, targetVolume: targetVol, fadeInDuration: fadeIn)
+                
+                // Broadcast updated playback state
+                self.send(json: [
+                    "type": "playback_state",
+                    "deviceId": self.deviceId,
+                    "isPlaying": true,
+                    "currentTrack": [
+                        "id": track.id,
+                        "name": track.name,
+                        "artistName": track.artistName,
+                        "albumArtURL": track.albumArtURL as Any
+                    ],
+                    "connectedUser": sender
+                ])
+            }
             
         case "volume_changed":
             if let devId = json["deviceId"] as? String, devId == deviceId,
@@ -214,5 +235,35 @@ final class MacReceiverService: NSObject {
             self.isReconnecting = false
             self.connect()
         }
+    }
+    
+    /// Автономний fallback пошук прев'ю на Mac через Apple iTunes Search API
+    private func resolveAudioFallback(artist: String, track: String) async -> URL? {
+        let query = "\(artist) \(track)"
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://itunes.apple.com/search?term=\(encoded)&entity=song&limit=1") else {
+            return nil
+        }
+        
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 4
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                struct ITunesResult: Codable {
+                    let previewUrl: String?
+                }
+                struct ITunesResponse: Codable {
+                    let results: [ITunesResult]
+                }
+                let res = try JSONDecoder().decode(ITunesResponse.self, from: data)
+                if let first = res.results.first?.previewUrl, let u = URL(string: first) {
+                    return u
+                }
+            }
+        } catch {
+            print("[MacReceiver] Fallback error: \(error.localizedDescription)")
+        }
+        return nil
     }
 }

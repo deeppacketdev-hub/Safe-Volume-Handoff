@@ -13,6 +13,7 @@ class AudioEngine {
     private(set) var currentTime: Double = 0       // Поточна позиція в секундах
     private(set) var duration: Double = 0           // Тривалість в секундах
     private(set) var volume: Float = 0.5            // Поточна гучність 0.0 - 1.0
+    private(set) var currentAudioURL: URL?          // Поточне активне аудіо-посилання
     
     // MARK: - Shuffle & Repeat
     enum RepeatMode: Int, CaseIterable {
@@ -176,7 +177,7 @@ class AudioEngine {
     private var playTask: Task<Void, Never>?
     
     /// Автоматичний пошук офіційного 30-секундного прев'ю саме цієї пісні та виконавця
-    private func resolveAudioURL(for track: Track) async -> URL? {
+    func resolveAudioURL(for track: Track) async -> URL? {
         // 1. Кеш
         if let cached = previewCache[track.id] {
             return cached
@@ -293,6 +294,7 @@ class AudioEngine {
                 print("AudioSession activation error: \(error)")
             }
             
+            self.currentAudioURL = previewURL
             let playerItem = AVPlayerItem(url: previewURL)
             let newPlayer = AVPlayer(playerItem: playerItem)
             newPlayer.volume = self.volume

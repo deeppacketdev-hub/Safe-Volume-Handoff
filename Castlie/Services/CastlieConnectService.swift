@@ -110,7 +110,8 @@ final class CastlieConnectService: NSObject {
     }
     
     /// Надіслати трек на віддалений Mac із Safe Fade-In
-    func sendHandoff(to deviceId: String, track: Track, targetVolume: Float, fadeInDuration: Double) {
+    func sendHandoff(to deviceId: String, track: Track, previewURL: URL? = nil, targetVolume: Float, fadeInDuration: Double) {
+        let finalURLString = previewURL?.absoluteString ?? track.previewURL?.absoluteString
         let payload: [String: Any] = [
             "type": "handoff",
             "targetDeviceId": deviceId,
@@ -123,10 +124,18 @@ final class CastlieConnectService: NSObject {
                 "artistName": track.artistName,
                 "albumName": track.albumName,
                 "albumArtURL": track.albumImageURL?.absoluteString as Any,
-                "previewURL": track.previewURL?.absoluteString as Any
+                "previewURL": finalURLString as Any
             ]
         ]
         send(json: payload)
+    }
+    
+    /// Оптимістичне оновлення стану для швидкого відгуку UI
+    func markReceiverAsPlaying(deviceId: String, volume: Float) {
+        if let idx = availableReceivers.firstIndex(where: { $0.id == deviceId }) {
+            availableReceivers[idx].isPlaying = true
+            availableReceivers[idx].volume = volume
+        }
     }
     
     /// Змінити гучність віддаленого пристрою в реальному часі

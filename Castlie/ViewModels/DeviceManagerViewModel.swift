@@ -60,20 +60,35 @@ class DeviceManagerViewModel {
                 volume: targetVol
             )
             
-            // Якщо на телефоні грає трек — передаємо його на Mac з Safe Fade-in
-            if let currentTrack = audioEngine.currentTrack {
-                connectService.sendHandoff(
-                    to: remote.id,
-                    track: currentTrack,
-                    targetVolume: targetVol,
-                    fadeInDuration: safeVolume.config.fadeInDuration
-                )
+            // Якщо на телефоні вибрано або грає трек (або є в черзі)
+            let trackToPlay = audioEngine.currentTrack ?? audioEngine.queue.first
+            if let track = trackToPlay {
+                // Оптимістично оновлюємо стан відтворення в UI
+                connectService.markReceiverAsPlaying(deviceId: remote.id, volume: targetVol)
+                
+                Task { @MainActor in
+                    let audioURL: URL?
+                    if let current = audioEngine.currentAudioURL {
+                        audioURL = current
+                    } else {
+                        audioURL = await audioEngine.resolveAudioURL(for: track)
+                    }
+                    
+                    connectService.sendHandoff(
+                        to: remote.id,
+                        track: track,
+                        previewURL: audioURL,
+                        targetVolume: targetVol,
+                        fadeInDuration: safeVolume.config.fadeInDuration
+                    )
+                }
+                
                 // Ставимо телефон на паузу, бо грає Mac
                 if audioEngine.isPlaying {
                     audioEngine.togglePlayPause()
                 }
             } else {
-                // Якщо трек не грає, просто встановлюємо безпечну гучність на Mac
+                // Якщо трек не обрано, просто встановлюємо безпечну гучність на Mac
                 connectService.setRemoteVolume(deviceId: remote.id, volume: targetVol)
             }
             
