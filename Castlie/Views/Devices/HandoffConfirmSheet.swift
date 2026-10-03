@@ -13,37 +13,52 @@ struct HandoffConfirmSheet: View {
     }
     
     var body: some View {
-        VStack(spacing: 24) {
-            // Заголовок
-            VStack(spacing: 8) {
-                Text("Безпечна гучність")
-                    .font(AppFonts.subheadline)
-                    .foregroundStyle(ThemeManager.shared.secondaryText)
-                
-                HStack(spacing: 8) {
+        VStack(spacing: 20) {
+            // Header
+            VStack(spacing: 6) {
+                Capsule()
+                    .fill(Color.white.opacity(0.24))
+                    .frame(width: 36, height: 4)
+                    .padding(.top, 4)
+                    .padding(.bottom, 8)
+
+                HStack(spacing: 10) {
                     Image(systemName: device.type.sfSymbol)
-                        .font(.title2)
-                    Text(device.name)
-                        .font(AppFonts.title2)
+                        .font(.title3)
+                        .foregroundStyle(ThemeManager.shared.accent)
+                        .frame(width: 38, height: 38)
+                        .background(ThemeManager.shared.accent.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(device.name)
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundStyle(ThemeManager.shared.primaryText)
+                            .lineLimit(1)
+
+                        Text("Безпечна гучність перед підключенням")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(ThemeManager.shared.secondaryText)
+                    }
+
+                    Spacer()
                 }
-                .foregroundStyle(ThemeManager.shared.primaryText)
             }
-            
-            Divider()
-                .background(ThemeManager.shared.cardBackground)
-            
-            // Повзунок гучності (МОЖНА ЗМІНИТИ ДО ПІДКЛЮЧЕННЯ)
-            VStack(spacing: 12) {
-                Text("Гучність пристрою:")
-                    .font(AppFonts.body)
-                    .foregroundStyle(ThemeManager.shared.primaryText)
-                
-                // Значення
-                Text("\(Int(adjustedVolume * 100))%")
-                    .font(AppFonts.largeTitle)
-                    .foregroundStyle(safety.color)
-                
-                // Повзунок
+
+            // Volume Control Card
+            VStack(spacing: 16) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Рівень виводу")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(ThemeManager.shared.secondaryText)
+
+                    Spacer()
+
+                    Text("\(Int(adjustedVolume * 100))%")
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundStyle(safety.color)
+                }
+
                 Slider(
                     value: $adjustedVolume,
                     in: 0...1,
@@ -52,85 +67,91 @@ struct HandoffConfirmSheet: View {
                     Text("Гучність")
                 } minimumValueLabel: {
                     Image(systemName: "speaker.fill")
-                        .font(.caption)
+                        .font(.system(size: 12))
                         .foregroundStyle(ThemeManager.shared.secondaryText)
                 } maximumValueLabel: {
                     Image(systemName: "speaker.wave.3.fill")
-                        .font(.caption)
+                        .font(.system(size: 12))
                         .foregroundStyle(ThemeManager.shared.secondaryText)
                 }
                 .tint(safety.color)
-                
-                // Індикатор безпеки
+
                 SafetyIndicator(level: safety)
-                
+
                 if adjustedVolume > safeVolume.config.effectiveMaxVolume {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.caption2)
+                            .font(.system(size: 11))
                             .foregroundStyle(Color(hex: "FF9500"))
-                        Text("Вище рекомендованого порогу (\(Int(safeVolume.config.effectiveMaxVolume * 100))%)")
-                            .font(AppFonts.caption2)
+                        Text("Вище ліміту (\(Int(safeVolume.config.effectiveMaxVolume * 100))%)")
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Color(hex: "FF9500"))
                     }
-                    .padding(.vertical, 4)
-                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .padding(.horizontal, 12)
                     .background(Color(hex: "FF9500").opacity(0.12))
                     .clipShape(Capsule())
                 }
             }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(ThemeManager.shared.cardBackground)
-            )
-            
-            // Інфо
-            VStack(spacing: 8) {
+            .padding(16)
+            .background(ThemeManager.shared.cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            // Safe Volume Meta Badges
+            HStack(spacing: 8) {
                 if safeVolume.config.isFadeInEnabled {
-                    InfoRow(
-                        icon: "timer",
-                        label: "Fade-in",
-                        value: "\(String(format: "%.1f", safeVolume.config.fadeInDuration)) сек"
+                    ConfigBadge(
+                        icon: "waveform.path",
+                        title: "Fade-in \(String(format: "%.1f", safeVolume.config.fadeInDuration))с"
                     )
                 }
-                
+
                 if safeVolume.config.isNightModeActive {
-                    InfoRow(
+                    ConfigBadge(
                         icon: "moon.fill",
-                        label: "Нічний режим",
-                        value: "увімкнено"
+                        title: "Нічний ліміт"
                     )
                 }
-                
-                InfoRow(
-                    icon: "chart.bar.fill",
-                    label: "Макс. поріг",
-                    value: "\(Int(safeVolume.config.effectiveMaxVolume * 100))%"
+
+                ConfigBadge(
+                    icon: "shield.fill",
+                    title: "Поріг \(Int(safeVolume.config.effectiveMaxVolume * 100))%"
                 )
             }
-            
-            Spacer()
-            
-            // Кнопки
-            VStack(spacing: 12) {
-                GlowingButton(
-                    title: "Зберегти рівень гучності",
-                    icon: "checkmark.shield.fill",
-                    color: safety.color,
-                    isFullWidth: true,
-                    action: onConfirm
-                )
-                
+
+            Spacer(minLength: 8)
+
+            // Actions
+            VStack(spacing: 10) {
+                Button {
+                    onConfirm()
+                    HapticFeedbackService.medium()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("Підключити з цією гучністю")
+                    }
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(safety.color)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
                 Button("Скасувати") {
                     onCancel()
+                    HapticFeedbackService.light()
                 }
-                .font(AppFonts.body)
+                .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(ThemeManager.shared.secondaryText)
-                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
             }
         }
-        .padding(24)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 24)
         .background(ThemeManager.shared.primaryBackground.ignoresSafeArea())
         .onChange(of: adjustedVolume) { oldValue, newValue in
             let threshold = safeVolume.config.effectiveMaxVolume
@@ -138,6 +159,28 @@ struct HandoffConfirmSheet: View {
                 HapticFeedbackService.warning()
             }
         }
+    }
+}
+
+// MARK: - Config Badge
+
+private struct ConfigBadge: View {
+    let icon: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundStyle(ThemeManager.shared.secondaryText)
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(ThemeManager.shared.secondaryText)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(ThemeManager.shared.cardBackground)
+        .clipShape(Capsule())
     }
 }
 

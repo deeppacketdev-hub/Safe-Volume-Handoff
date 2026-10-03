@@ -1,73 +1,119 @@
 import SwiftUI
 
+@MainActor
+final class ArtworkImageCache {
+    static let shared: NSCache<NSURL, UIImage> = {
+        let cache = NSCache<NSURL, UIImage>()
+        cache.countLimit = 40
+        cache.totalCostLimit = 40 * 1024 * 1024 // 40 MB max
+        return cache
+    }()
+}
+
 struct AlbumArtView: View {
     let track: Track
     var isPlaying: Bool = true
+    var size: CGFloat? = nil
+    var cornerRadius: CGFloat = 18
+    var shadowRadius: CGFloat? = nil
+    var shadowY: CGFloat? = nil
+    var shadowOpacity: Double? = nil
+    var scale: CGFloat? = nil
     var onColorExtracted: ((Color) -> Void)?
-    
+    var onPaletteExtracted: ((ArtworkPalette) -> Void)?
+
+    @State private var cachedImage: UIImage?
+
+    private var targetSize: CGFloat {
+        size ?? 280
+    }
+
+    private var effectiveShadowRadius: CGFloat {
+        shadowRadius ?? (isPlaying ? 24 : 10)
+    }
+
+    private var effectiveShadowY: CGFloat {
+        shadowY ?? (isPlaying ? 12 : 5)
+    }
+
+    private var effectiveShadowOpacity: Double {
+        shadowOpacity ?? (isPlaying ? 0.45 : 0.20)
+    }
+
+    private var effectiveScale: CGFloat {
+        scale ?? (isPlaying ? 1.0 : 0.88)
+    }
+
     var body: some View {
-        AsyncImage(url: track.albumImageURL) { phase in
-            switch phase {
-            case .success(let image):
-                image
+        Group {
+            if let image = cachedImage {
+                Image(uiImage: image)
                     .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .shadow(
-                        color: .black.opacity(isPlaying ? 0.45 : 0.2),
-                        radius: isPlaying ? 24 : 10,
-                        y: isPlaying ? 12 : 5
-                    )
-                    .scaleEffect(isPlaying ? 1.0 : 0.86)
-                    .animation(.spring(response: 0.42, dampingFraction: 0.75), value: isPlaying)
-                    .onAppear {
-                        // Витягуємо домінантний колір
-                        Task {
-                            if let uiImage = await loadUIImage(from: track.albumImageURL) {
-                                let color = uiImage.dominantColor
-                                await MainActor.run {
-                                    onColorExtracted?(color)
-                                }
-                            }
-                        }
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                AsyncImage(url: track.albumImageURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    case .failure, .empty:
+                        albumPlaceholder
+                    @unknown default:
+                        albumPlaceholder
                     }
-            case .failure:
-                albumPlaceholder
-            case .empty:
-                albumPlaceholder
-                    .overlay {
-                        ProgressView()
-                            .tint(ThemeManager.shared.accent)
-                    }
-            @unknown default:
-                albumPlaceholder
+                }
             }
         }
-        .frame(maxWidth: 320, maxHeight: 320)
-        .padding(.horizontal, 32)
+        .frame(width: targetSize, height: targetSize)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .shadow(
+            color: .black.opacity(effectiveShadowOpacity),
+            radius: effectiveShadowRadius,
+            y: effectiveShadowY
+        )
+        .scaleEffect(effectiveScale)
+        .animation(.spring(response: 0.38, dampingFraction: 0.75), value: isPlaying)
+        .task(id: track.albumImageURL) {
+            await loadImageAndExtractColor()
+        }
     }
-    
+
     private var albumPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .fill(ThemeManager.shared.cardBackground)
-            .aspectRatio(1, contentMode: .fit)
-            .scaleEffect(isPlaying ? 1.0 : 0.86)
-            .animation(.spring(response: 0.42, dampingFraction: 0.75), value: isPlaying)
+            .frame(width: targetSize, height: targetSize)
             .overlay {
                 Image(systemName: "music.note")
-                    .font(.system(size: 60))
+                    .font(.system(size: max(14, targetSize * 0.28)))
                     .foregroundStyle(ThemeManager.shared.secondaryText)
             }
     }
-    
-    /// Завантажити UIImage з URL
-    private func loadUIImage(from url: URL?) async -> UIImage? {
-        guard let url else { return nil }
+
+    @MainActor
+    private func loadImageAndExtractColor() async {
+        guard let url = track.albumImageURL else { return }
+
+        if let cached = ArtworkImageCache.shared.object(forKey: url as NSURL) {
+            self.cachedImage = cached
+            let palette = cached.artworkPalette
+            self.onColorExtracted?(palette.primary)
+            self.onPaletteExtracted?(palette)
+            return
+        }
+
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
-            return UIImage(data: data)
+            if let uiImage = UIImage(data: data) {
+                ArtworkImageCache.shared.setObject(uiImage, forKey: url as NSURL)
+                self.cachedImage = uiImage
+                
+                let palette = uiImage.artworkPalette
+                self.onColorExtracted?(palette.primary)
+                self.onPaletteExtracted?(palette)
+            }
         } catch {
-            return nil
+            // Placeholder handled by AsyncImage / fallback
         }
     }
 }

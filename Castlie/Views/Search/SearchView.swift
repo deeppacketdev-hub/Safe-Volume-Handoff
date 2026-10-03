@@ -3,7 +3,8 @@ import SwiftUI
 struct SearchView: View {
     @State private var viewModel = SearchViewModel()
     @State private var audioEngine = AudioEngine.shared
-    
+    @FocusState private var isSearchFocused: Bool
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -11,15 +12,20 @@ struct SearchView: View {
                 HStack {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(ThemeManager.shared.secondaryText)
-                    
+
                     TextField("Пошук треків...", text: $viewModel.searchText)
                         .foregroundStyle(ThemeManager.shared.primaryText)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
+                        .submitLabel(.search)
+                        .focused($isSearchFocused)
+                        .onSubmit {
+                            viewModel.performSearch()
+                        }
                         .onChange(of: viewModel.searchText) { _, _ in
                             viewModel.performSearch()
                         }
-                    
+
                     if !viewModel.searchText.isEmpty {
                         Button {
                             viewModel.searchText = ""
@@ -35,7 +41,7 @@ struct SearchView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal)
                 .padding(.top, 8)
-                
+
                 // Контент
                 if !viewModel.searchText.isEmpty {
                     if viewModel.isSearching {
@@ -57,12 +63,14 @@ struct SearchView: View {
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 4) {
-                                ForEach(viewModel.results) { track in
+                                ForEach(Array(viewModel.results.enumerated()), id: \.element.id) { index, track in
                                     SpotifyTrackRow(track: track) {
+                                        // Dismiss keyboard instantly on track tap
+                                        isSearchFocused = false
                                         viewModel.addRecentTrack(track)
                                         audioEngine.play(
                                             tracks: viewModel.results,
-                                            startIndex: viewModel.results.firstIndex(of: track) ?? 0
+                                            startIndex: index
                                         )
                                     }
                                 }
@@ -70,6 +78,7 @@ struct SearchView: View {
                             .padding(.top, 8)
                             .padding(.bottom, audioEngine.currentTrack != nil ? 80 : 24)
                         }
+                        .scrollDismissesKeyboard(.interactively)
                     }
                 } else {
                     if !viewModel.recentTracks.isEmpty {
@@ -78,9 +87,9 @@ struct SearchView: View {
                                 Text("Останній пошук")
                                     .font(AppFonts.headline)
                                     .foregroundStyle(ThemeManager.shared.primaryText)
-                                
+
                                 Spacer()
-                                
+
                                 Button {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         viewModel.clearRecentTracks()
@@ -93,19 +102,21 @@ struct SearchView: View {
                             }
                             .padding(.horizontal)
                             .padding(.top, 16)
-                            
+
                             ScrollView {
                                 LazyVStack(spacing: 4) {
                                     ForEach(viewModel.recentTracks) { track in
                                         HStack(spacing: 0) {
                                             SpotifyTrackRow(track: track) {
+                                                // Dismiss keyboard instantly on track tap
+                                                isSearchFocused = false
                                                 viewModel.addRecentTrack(track)
                                                 audioEngine.play(
                                                     tracks: viewModel.recentTracks,
                                                     startIndex: viewModel.recentTracks.firstIndex(of: track) ?? 0
                                                 )
                                             }
-                                            
+
                                             Button {
                                                 withAnimation(.easeInOut(duration: 0.2)) {
                                                     viewModel.removeRecentTrack(track)
@@ -134,6 +145,7 @@ struct SearchView: View {
                                 .padding(.top, 4)
                                 .padding(.bottom, audioEngine.currentTrack != nil ? 80 : 24)
                             }
+                            .scrollDismissesKeyboard(.interactively)
                         }
                     } else {
                         Spacer()
@@ -151,6 +163,10 @@ struct SearchView: View {
             }
             .background(ThemeManager.shared.primaryBackground.ignoresSafeArea())
             .navigationTitle("Пошук")
+            .onTapGesture {
+                // Dismiss keyboard when tapping outside the text field
+                isSearchFocused = false
+            }
         }
     }
 }

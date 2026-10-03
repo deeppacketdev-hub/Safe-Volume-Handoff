@@ -4,55 +4,71 @@ struct ContentView: View {
     @State private var selectedTab: AppTab = .home
     @State private var audioEngine = AudioEngine.shared
     @State private var showFullPlayer = false
-    
+    @State private var showDevicesSheet = false
+    @State private var devicesSheetDetent: PresentationDetent = .medium
+
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // TabView
-            TabView(selection: $selectedTab) {
-                HomeView()
-                    .tabItem {
-                        Label("Головна", systemImage: "music.note.house.fill")
-                    }
-                    .tag(AppTab.home)
-                
-                SearchView()
-                    .tabItem {
-                        Label("Пошук", systemImage: "magnifyingglass")
-                    }
-                    .tag(AppTab.search)
-                
-                DevicesView()
-                    .tabItem {
-                        Label("Пристрої", systemImage: "hifispeaker.2.fill")
-                    }
-                    .tag(AppTab.devices)
-                
-                SettingsView()
-                    .tabItem {
-                        Label("Налаштування", systemImage: "gearshape.fill")
-                    }
-                    .tag(AppTab.settings)
+        GeometryReader { windowGeo in
+            let screenWidth = windowGeo.size.width
+            let screenHeight = windowGeo.size.height
+            let safeTop = windowGeo.safeAreaInsets.top > 0 ? windowGeo.safeAreaInsets.top : 59
+            let safeBottom = windowGeo.safeAreaInsets.bottom > 0 ? windowGeo.safeAreaInsets.bottom : 34
+
+            ZStack(alignment: .topLeading) {
+                // 1. TabView
+                TabView(selection: $selectedTab) {
+                    HomeView()
+                        .tabItem {
+                            Label("Головна", systemImage: "music.note.house.fill")
+                        }
+                        .tag(AppTab.home)
+
+                    SearchView()
+                        .tabItem {
+                            Label("Пошук", systemImage: "magnifyingglass")
+                        }
+                        .tag(AppTab.search)
+
+                    DevicesView()
+                        .tabItem {
+                            Label("Пристрої", systemImage: "hifispeaker.2.fill")
+                        }
+                        .tag(AppTab.devices)
+
+                    SettingsView()
+                        .tabItem {
+                            Label("Налаштування", systemImage: "gearshape.fill")
+                        }
+                        .tag(AppTab.settings)
+                }
+                .tint(ThemeManager.shared.accent)
+                .frame(width: screenWidth, height: screenHeight)
+
+                // 2. Apple Interactive Morphing Player
+                if audioEngine.currentTrack != nil {
+                    FullPlayerView(
+                        isPresented: $showFullPlayer,
+                        showDevicesSheet: $showDevicesSheet,
+                        devicesSheetDetent: $devicesSheetDetent,
+                        selectedTab: selectedTab,
+                        screenWidth: screenWidth,
+                        screenHeight: screenHeight,
+                        safeTop: safeTop,
+                        safeBottom: safeBottom
+                    )
+                    .zIndex(20)
+                }
             }
-            .tint(ThemeManager.shared.accent)
-            
-            // Міні-плеєр — показується тільки коли є трек (парить над TabBar як острівець)
-            if audioEngine.currentTrack != nil {
-                MiniPlayerView(showFullPlayer: $showFullPlayer)
-                    .padding(.bottom, 54) // Відступ над стандартним TabBar
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .animation(.spring(response: 0.38, dampingFraction: 0.82), value: audioEngine.currentTrack != nil)
-            }
-            
-            // Системний невидимий міст для перехоплення та синхронізації апаратної гучності (Mac, AirPlay, Bluetooth)
-            SystemVolumeBridge()
-                .frame(width: 1, height: 1)
-                .opacity(0.0001)
-                .allowsHitTesting(false)
+            .preferredColorScheme(.dark)
+            .animation(.spring(response: 0.38, dampingFraction: 0.84), value: audioEngine.currentTrack != nil)
         }
-        .preferredColorScheme(.dark)
-        .fullScreenCover(isPresented: $showFullPlayer) {
-            FullPlayerView(isPresented: $showFullPlayer)
-                .presentationBackground(.clear)
+        .ignoresSafeArea()
+        .sheet(isPresented: $showDevicesSheet) {
+            DevicesView(currentDetent: $devicesSheetDetent)
+                .presentationDetents([.medium, .large], selection: $devicesSheetDetent)
+                .presentationDragIndicator(.visible)
+                .presentationBackground(ThemeManager.shared.primaryBackground)
+                .ignoresSafeArea(edges: .bottom)
         }
     }
 }

@@ -28,6 +28,7 @@ final class MacReceiverService: NSObject {
     
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?
+    private var pingTimer: Timer?
     private var isReconnecting = false
     
     let audioPlayer = MacAudioPlayer.shared
@@ -64,12 +65,35 @@ final class MacReceiverService: NSObject {
         isConnectedToServer = true
         sendRegistration()
         listenForMessages()
+        startPingTimer()
     }
     
     func disconnect() {
+        pingTimer?.invalidate()
+        pingTimer = nil
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
         isConnectedToServer = false
+    }
+    
+    private func startPingTimer() {
+        pingTimer?.invalidate()
+        pingTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.sendPing()
+            }
+        }
+    }
+    
+    private func sendPing() {
+        webSocketTask?.sendPing { [weak self] error in
+            if let error {
+                print("[MacReceiver] Ping error: \(error.localizedDescription)")
+                Task { @MainActor in
+                    self?.handleDisconnect()
+                }
+            }
+        }
     }
     
     // MARK: - Outgoing Messages

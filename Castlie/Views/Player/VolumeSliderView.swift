@@ -4,76 +4,85 @@ struct VolumeSliderView: View {
     @State private var audioEngine = AudioEngine.shared
     @State private var safeVolume = SafeVolumeManager.shared
     @State private var isDragging = false
+    @State private var localVolume: Float = 0.5
     @State private var lastLevel: SafeVolumeManager.SafetyLevel?
-    
+
+    private var currentDisplayVolume: CGFloat {
+        CGFloat(max(0, min(1, isDragging ? localVolume : audioEngine.volume)))
+    }
+
     var body: some View {
         HStack(spacing: 14) {
-            // Іконка тихо (Apple Music стиль)
+            // Speaker low icon
             Image(systemName: "speaker.fill")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(ThemeManager.shared.secondaryText)
                 .frame(width: 20)
-            
-            // Інтерактивний Apple Music повзунок
+
+            // High-Performance Apple Music Volume Track
             GeometryReader { geometry in
-                let currentVolume = CGFloat(audioEngine.volume)
-                let clamped = max(0, min(1, currentVolume))
-                let sliderHeight: CGFloat = isDragging ? 8 : 6
-                
+                let width = max(1, geometry.size.width)
+                let clamped = currentDisplayVolume
+                let barHeight: CGFloat = isDragging ? 8 : 6
+                let thumbDiameter: CGFloat = isDragging ? 18 : 10
+
                 ZStack(alignment: .leading) {
-                    // Фонова доріжка
+                    // Background track
                     Capsule()
                         .fill(Color.white.opacity(0.18))
-                        .frame(height: sliderHeight)
-                    
-                    // Заповнена частина з кольором безпеки Safe Volume
+                        .frame(height: barHeight)
+
+                    // Filled active track with Safe Volume safety color
                     Capsule()
-                        .fill(safeVolume.safetyLevel(for: audioEngine.volume).color)
-                        .frame(
-                            width: geometry.size.width * clamped,
-                            height: sliderHeight
-                        )
-                    
-                    // Apple Thumb
+                        .fill(safeVolume.safetyLevel(for: isDragging ? localVolume : audioEngine.volume).color)
+                        .frame(width: width * clamped, height: barHeight)
+
+                    // Apple Thumb: perfectly centered and clamped within bounds
                     Circle()
                         .fill(Color.white)
-                        .frame(width: isDragging ? 16 : 0, height: isDragging ? 16 : 0)
-                        .shadow(color: .black.opacity(0.3), radius: 4, y: 1)
-                        .offset(x: max(0, min(geometry.size.width - 16, geometry.size.width * clamped - 8)))
+                        .frame(width: thumbDiameter, height: thumbDiameter)
+                        .shadow(color: .black.opacity(isDragging ? 0.35 : 0.15), radius: isDragging ? 4 : 2, y: 1)
+                        .offset(x: clamped * (width - thumbDiameter))
                 }
-                .frame(height: 16)
+                .frame(width: width, height: 44, alignment: .center)
                 .contentShape(Rectangle())
-                .animation(.spring(response: 0.25, dampingFraction: 0.75), value: isDragging)
-                .gesture(
-                    DragGesture(minimumDistance: 0)
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 0, coordinateSpace: .local)
                         .onChanged { value in
                             if !isDragging {
                                 isDragging = true
+                                localVolume = audioEngine.volume
                                 HapticFeedbackService.light()
                             }
-                            let newVolume = Float(max(0, min(1, value.location.x / geometry.size.width)))
-                            audioEngine.setVolume(newVolume)
-                            
-                            // Тактильний відгук при переході між безпечними та небезпечними рівнями
-                            let currentLevel = safeVolume.safetyLevel(for: newVolume)
+                            let newVol = Float(max(0.0, min(1.0, value.location.x / width)))
+                            localVolume = newVol
+                            audioEngine.setVolume(newVol)
+
+                            // Haptic tick when crossing safety threshold
+                            let currentLevel = safeVolume.safetyLevel(for: newVol)
                             if let last = lastLevel, last != currentLevel {
                                 HapticFeedbackService.medium()
                             }
                             lastLevel = currentLevel
                         }
                         .onEnded { _ in
-                            isDragging = false
+                            withAnimation(.spring(response: 0.22, dampingFraction: 0.8)) {
+                                isDragging = false
+                            }
                             lastLevel = nil
                         }
                 )
             }
-            .frame(height: 16)
-            
-            // Іконка гучно
+            .frame(height: 44)
+
+            // Speaker high icon
             Image(systemName: "speaker.wave.3.fill")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(ThemeManager.shared.secondaryText)
                 .frame(width: 20)
+        }
+        .onAppear {
+            localVolume = audioEngine.volume
         }
     }
 }

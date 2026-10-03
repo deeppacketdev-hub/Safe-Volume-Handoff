@@ -459,6 +459,13 @@ GET https://api.spotify.com/v1/recommendations?seed_genres=rock
 - [x] Тестування на фізичному iPhone / iOS Simulator
 - [x] Повна оптимізація та Swift 6 strict concurrency
 
+### Фаза 7: Повноцінний Плеєр Spotify (Full Playback)
+- [ ] Дослідити архітектуру Spotify Web Playback SDK, Spotify Connect API та Spotify App Remote
+- [ ] Реалізувати OAuth 2.0 PKCE авторизацію для користувачів Spotify Premium
+- [ ] Додати `SpotifyConnectService` для відтворення повних треків та контролю гучності пристроїв
+- [ ] Інтегрувати виявлення Spotify Connect колонок у вкладку "Пристрої" із Safe Volume Handoff
+- [ ] Розгорнути Web Playback SDK на Mac-ресивері (`castlie.dron.lol`) для повного відтворення на Mac
+
 ---
 
 ## Зв'язок з Дослідженням

@@ -4,55 +4,51 @@ struct AnimatedWaveform: View {
     let isPlaying: Bool
     let color: Color
     let barCount: Int
+    var maxHeight: CGFloat = 16
     
-    @State private var animationPhases: [CGFloat]
-    
-    init(isPlaying: Bool, color: Color = ThemeManager.shared.accent, barCount: Int = 4) {
+    init(
+        isPlaying: Bool,
+        color: Color = ThemeManager.shared.accent,
+        barCount: Int = 4,
+        maxHeight: CGFloat = 16
+    ) {
         self.isPlaying = isPlaying
         self.color = color
         self.barCount = barCount
-        self._animationPhases = State(initialValue: Array(repeating: 0.3, count: barCount))
+        self.maxHeight = maxHeight
     }
     
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<barCount, id: \.self) { index in
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(color)
-                    .frame(width: 3, height: max(3, animationPhases[index] * 20))
+        TimelineView(.animation(paused: !isPlaying)) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate
+            HStack(alignment: .bottom, spacing: 2) {
+                ForEach(0..<barCount, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(color)
+                        .frame(width: 3, height: barHeight(for: index, time: time))
+                }
             }
         }
-        .frame(height: 20)
-        .onAppear {
-            if isPlaying { startAnimation() }
-        }
-        .onChange(of: isPlaying) { _, newValue in
-            if newValue {
-                startAnimation()
-            } else {
-                stopAnimation()
-            }
-        }
+        .frame(height: maxHeight, alignment: .bottom)
     }
-    
-    private func startAnimation() {
-        for i in 0..<barCount {
-            withAnimation(
-                .easeInOut(duration: Double.random(in: 0.3...0.6))
-                .repeatForever(autoreverses: true)
-                .delay(Double(i) * 0.1)
-            ) {
-                animationPhases[i] = CGFloat.random(in: 0.3...1.0)
+
+    private func barHeight(for index: Int, time: Double) -> CGFloat {
+        if !isPlaying {
+            switch index % 4 {
+            case 0: return maxHeight * 0.38
+            case 1: return maxHeight * 0.72
+            case 2: return maxHeight * 0.48
+            default: return maxHeight * 0.88
             }
         }
-    }
-    
-    private func stopAnimation() {
-        withAnimation(.easeOut(duration: 0.3)) {
-            for i in 0..<barCount {
-                animationPhases[i] = 0.3
-            }
-        }
+        let speeds: [Double] = [8.5, 6.2, 9.8, 7.1]
+        let speed = speeds[index % speeds.count]
+        let offset = Double(index) * 1.35
+        let rawWave = sin(time * speed + offset)
+        let normalized = (rawWave + 1.0) / 2.0 // 0.0 ... 1.0
+        let minH = maxHeight * 0.28
+        let maxH = maxHeight * 0.95
+        return minH + CGFloat(normalized) * (maxH - minH)
     }
 }
 
@@ -60,9 +56,10 @@ struct AnimatedWaveform: View {
     HStack(spacing: 20) {
         AnimatedWaveform(isPlaying: true)
         AnimatedWaveform(isPlaying: false)
-        AnimatedWaveform(isPlaying: true, color: ThemeManager.shared.safeColor, barCount: 6)
+        AnimatedWaveform(isPlaying: true, color: ThemeManager.shared.safeColor, barCount: 6, maxHeight: 18)
     }
     .padding()
     .preferredColorScheme(.dark)
     .background(ThemeManager.shared.primaryBackground)
 }
+

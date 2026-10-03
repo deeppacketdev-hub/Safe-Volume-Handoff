@@ -2,48 +2,55 @@ import SwiftUI
 
 struct VolumeLimitSettings: View {
     @State private var safeVolume = SafeVolumeManager.shared
-    
+
+    private var safety: SafeVolumeManager.SafetyLevel {
+        safeVolume.safetyLevel(for: safeVolume.config.maxVolumeThreshold)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(spacing: 12) {
             HStack {
-                Text("Максимальний поріг")
+                Text("Поріг гучності")
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(ThemeManager.shared.primaryText)
+
                 Spacer()
+
                 Text("\(Int(safeVolume.config.maxVolumeThreshold * 100))%")
-                    .foregroundStyle(
-                        safeVolume.safetyLevel(for: safeVolume.config.maxVolumeThreshold).color
-                    )
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(safety.color)
             }
-            
+
             Slider(
                 value: $safeVolume.config.maxVolumeThreshold,
                 in: 0.1...1.0,
                 step: 0.05
             )
-            .tint(safeVolume.safetyLevel(for: safeVolume.config.maxVolumeThreshold).color)
-            
-            HStack {
-                Text("10%")
-                    .font(AppFonts.caption2)
-                    .foregroundStyle(ThemeManager.shared.secondaryText)
+            .tint(safety.color)
+
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(safety.color)
+                    .frame(width: 7, height: 7)
+
+                Text(safety.label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(safety.color)
+
                 Spacer()
-                Text("100%")
-                    .font(AppFonts.caption2)
-                    .foregroundStyle(ThemeManager.shared.secondaryText)
+
+                Text("Рекомендовано: до 70%")
+                    .font(.system(size: 11))
+                    .foregroundStyle(ThemeManager.shared.secondaryText.opacity(0.8))
             }
         }
-        
-        // Безпека індикатор
-        SafetyIndicator(level: safeVolume.safetyLevel(for: safeVolume.config.maxVolumeThreshold))
-        
-        Text("При підключенні до нового пристрою гучність не перевищить цей рівень, навіть якщо попередня гучність пристрою була вищою")
-            .font(AppFonts.caption)
-            .foregroundStyle(ThemeManager.shared.secondaryText)
+        .padding(.vertical, 4)
     }
 }
 
 #Preview {
     List {
-        Section("Обмеження гучності") {
+        Section("Ліміт гучності") {
             VolumeLimitSettings()
         }
     }

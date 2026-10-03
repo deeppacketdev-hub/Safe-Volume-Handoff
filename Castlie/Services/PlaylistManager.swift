@@ -7,7 +7,12 @@ class PlaylistManager {
     static let shared = PlaylistManager()
     
     var playlists: [Playlist] = []
-    var likedTracks: [Track] = []
+    var likedTracks: [Track] = [] {
+        didSet {
+            likedTrackIds = Set(likedTracks.map(\.id))
+        }
+    }
+    private(set) var likedTrackIds: Set<String> = []
     
     private let playlistsKey = "Castlie_Playlists"
     private let likedTracksKey = "Castlie_LikedTracks"
@@ -19,9 +24,9 @@ class PlaylistManager {
     
     // MARK: - Likes / Favorites
     
-    /// Перевіряє, чи трек вподобаний
+    /// Перевіряє, чи трек вподобаний (O(1) швидкий пошук через Set)
     func isLiked(track: Track) -> Bool {
-        likedTracks.contains(where: { $0.id == track.id })
+        likedTrackIds.contains(track.id)
     }
     
     /// Додати або прибрати трек з улюблених

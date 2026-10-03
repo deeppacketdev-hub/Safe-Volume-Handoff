@@ -46,6 +46,10 @@ class AudioEngine {
         setupAudioSession()
         setupRemoteCommandCenter()
         setupInterruptionHandling()
+        
+        // Ініціалізуємо слухач системної гучності та синхронізуємо початковий рівень
+        _ = SystemVolumeController.shared
+        self.volume = AVAudioSession.sharedInstance().outputVolume
     }
     
     // MARK: - Audio Session Setup
@@ -324,9 +328,19 @@ class AudioEngine {
     
     /// Налаштування AVPlayer для локального або фонового/дистанційного відтворення
     private func setupPlayerItem(url: URL, isMutedForRemote: Bool) {
+        // Гарантуємо відсутність витоку спостерігачів від попереднього треку
+        if let existingTimeObserver = self.timeObserver {
+            self.player?.removeTimeObserver(existingTimeObserver)
+            self.timeObserver = nil
+        }
+        if let existingEndObserver = self.endObserver {
+            NotificationCenter.default.removeObserver(existingEndObserver)
+            self.endObserver = nil
+        }
+
         let playerItem = AVPlayerItem(url: url)
         let newPlayer = AVPlayer(playerItem: playerItem)
-        newPlayer.volume = isMutedForRemote ? 0.0 : self.volume
+        newPlayer.volume = isMutedForRemote ? 0.0 : 1.0
         self.player = newPlayer
         
         // Підписка на закінчення треку
@@ -335,7 +349,7 @@ class AudioEngine {
             object: playerItem,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 if self.repeatMode == .one {
                     self.seek(to: 0)
@@ -352,12 +366,12 @@ class AudioEngine {
             }
         }
         
-        // Підписка на оновлення прогресу (кожні 0.1 секунди)
+        // Підписка на оновлення прогресу (кожні 0.1 секунди для маслянисто плавної анімації треку)
         self.timeObserver = newPlayer.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
+            forInterval: CMTime(seconds: 0.10, preferredTimescale: 600),
             queue: .main
         ) { [weak self] time in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.currentTime = time.seconds
                 if let itemDuration = self.player?.currentItem?.duration.seconds,
@@ -550,7 +564,7 @@ class AudioEngine {
             player?.volume = 0
             CastlieConnectService.shared.setRemoteVolume(deviceId: remote.id, volume: clamped)
         } else {
-            player?.volume = clamped
+            player?.volume = 1.0
         }
     }
     
