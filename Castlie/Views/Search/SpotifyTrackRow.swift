@@ -16,22 +16,25 @@ struct SpotifyTrackRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                // Обкладинка (маленька)
-                AsyncImage(url: track.albumImageURL) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(ThemeManager.shared.cardBackground)
-                        .overlay {
-                            Image(systemName: "music.note")
-                                .font(.caption)
-                                .foregroundStyle(ThemeManager.shared.secondaryText)
+                // Обкладинка (маленька) — Color.clear guarantees exact 48×48 layout
+                Color.clear
+                    .frame(width: 48, height: 48)
+                    .overlay {
+                        AsyncImage(url: track.albumImageURL) { image in
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(ThemeManager.shared.cardBackground)
+                                .overlay {
+                                    Image(systemName: "music.note")
+                                        .font(.caption)
+                                        .foregroundStyle(ThemeManager.shared.secondaryText)
+                                }
                         }
-                }
-                .frame(width: 48, height: 48)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 
                 // Інформація
                 VStack(alignment: .leading, spacing: 2) {

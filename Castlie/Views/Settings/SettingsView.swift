@@ -8,16 +8,6 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                // 1. Безпека слуху
-                Section {
-                    VolumeLimitSettings()
-                } header: {
-                    SettingsSectionHeader(
-                        title: "Безпека слуху",
-                        icon: "speaker.wave.3.fill",
-                        badgeColor: Color(hex: "FF6B35")
-                    )
-                }
 
                 // 2. Нічний режим
                 Section {
@@ -46,8 +36,6 @@ struct SettingsView: View {
                     Toggle("Запитувати підтвердження", isOn: $viewModel.safeVolume.config.requireConfirmation)
                         .tint(ThemeManager.shared.accent)
 
-                    Toggle("Показувати демо-пристрої", isOn: $viewModel.discovery.showMockDevices)
-                        .tint(ThemeManager.shared.accent)
 
                     HStack {
                         Text("Сервер Connect")

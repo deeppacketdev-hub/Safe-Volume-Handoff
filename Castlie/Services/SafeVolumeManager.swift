@@ -49,43 +49,77 @@ class SafeVolumeManager {
         }
     }
     
-    /// Визначити рівень безпеки для заданої гучності
+    /// Визначити рівень безпеки для заданої гучності (фіксовані пороги)
     func safetyLevel(for volume: Float) -> SafetyLevel {
-        let effectiveMax = config.effectiveMaxVolume
-        if volume <= effectiveMax * 0.7 {
+        if volume <= 0.5 {
             return .safe
-        } else if volume <= effectiveMax {
+        } else if volume <= 0.75 {
             return .warning
         } else {
             return .danger
         }
     }
     
-    /// Обмежити гучність з урахуванням налаштувань
-    func clampVolume(_ volume: Float) -> Float {
-        return min(volume, config.effectiveMaxVolume)
-    }
-    
     /// Отримати рекомендовану початкову гучність для пристрою
     func recommendedVolume(for device: AudioDevice) -> Float {
-        // Шукаємо в історії останнє підключення до цього пристрою
+        let cleanName = device.name.trimmingCharacters(in: .whitespaces).lowercased()
+        // Шукаємо в історії останнє підключення до цього пристрою (за ID або за назвою)
         if let lastEntry = deviceHistories
-            .filter({ $0.deviceId == device.id })
+            .filter({ $0.deviceId == device.id || $0.deviceName.lowercased() == cleanName })
             .sorted(by: { $0.timestamp > $1.timestamp })
             .first {
-            return clampVolume(lastEntry.volume)
+            var vol = lastEntry.volume
+            if config.isNightModeActive {
+                vol = min(vol, config.nightModeMaxVolume)
+            }
+            return vol
         }
         
-        // Якщо історії немає — повертаємо безпечне значення
-        return clampVolume(0.3) // 30% за замовчуванням
+        // Безпечні дефолти якщо історії немає
+        var defVol: Float = 0.30
+        if device.type == .headphones {
+            defVol = 0.25
+        } else if device.type == .iPhone {
+            defVol = 0.35
+        } else if device.type == .mac {
+            defVol = 0.40
+        }
+        
+        if config.isNightModeActive {
+            defVol = min(defVol, config.nightModeMaxVolume)
+        }
+        return defVol
     }
     
     // MARK: - Device History
+    
+    /// Оновити збережену гучність для поточного пристрою
+    func updateDeviceVolume(deviceId: String, deviceName: String, volume: Float) {
+        let cleanName = deviceName.trimmingCharacters(in: .whitespaces)
+        guard !cleanName.isEmpty else { return }
+        let clamped = max(0, min(1, volume))
+        
+        if let idx = deviceHistories.firstIndex(where: {
+            $0.deviceId == deviceId || $0.deviceName.lowercased() == cleanName.lowercased()
+        }) {
+            let old = deviceHistories[idx]
+            deviceHistories[idx] = DeviceHistoryEntry(
+                deviceId: deviceId.isEmpty ? old.deviceId : deviceId,
+                deviceName: cleanName,
+                volume: clamped,
+                wasNightMode: config.isNightModeActive
+            )
+            saveHistories()
+        } else {
+            recordConnection(deviceId: deviceId, deviceName: cleanName, volume: clamped)
+        }
+    }
     
     /// Зберегти запис про підключення без дублювання
     func recordConnection(deviceId: String, deviceName: String, volume: Float) {
         let cleanName = deviceName.trimmingCharacters(in: .whitespaces)
         guard !cleanName.isEmpty else { return }
+        let clamped = max(0, min(1, volume))
         
         // Видаляємо всі попередні записи для цього ж пристрою (за ID або за назвою)
         deviceHistories.removeAll {
@@ -95,7 +129,7 @@ class SafeVolumeManager {
         let entry = DeviceHistoryEntry(
             deviceId: deviceId,
             deviceName: cleanName,
-            volume: volume,
+            volume: clamped,
             wasNightMode: config.isNightModeActive
         )
         // Вставляємо оновлений запис на початок
@@ -131,6 +165,14 @@ class SafeVolumeManager {
             .filter { $0.deviceName.lowercased() == clean }
             .sorted { $0.timestamp > $1.timestamp }
             .first?.volume
+    }
+    
+    /// Отримати останню відому гучність для моделі AudioDevice
+    func lastKnownVolume(for device: AudioDevice) -> Float? {
+        if let byId = lastKnownVolume(for: device.id) {
+            return byId
+        }
+        return lastKnownVolume(forDeviceName: device.name)
     }
     
     // MARK: - Persistence

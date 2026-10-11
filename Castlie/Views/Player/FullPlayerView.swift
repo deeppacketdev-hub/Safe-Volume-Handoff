@@ -370,7 +370,7 @@ struct FullPlayerView: View {
                     .opacity(max(0.0, 1.0 - p * 1.4))
             }
 
-            // B. Mini Player Apple Liquid Glass Surface (iOS 26+ native glassEffect in capsule)
+            // B. Mini Player Liquid Glass Surface (uses RoundedRectangle, not .capsule, to avoid circular shape mid-transition)
             if p > 0.15 {
                 miniPlayerGlassSurface()
                     .opacity(min(1.0, max(0.0, (p - 0.20) / 0.80)))
@@ -383,17 +383,9 @@ struct FullPlayerView: View {
 
     @ViewBuilder
     private func miniPlayerGlassSurface() -> some View {
-        if #available(iOS 26, *) {
-            GlassEffectContainer(spacing: 0) {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .glassEffect(.regular.interactive(), in: .capsule)
-            }
+        RoundedRectangle(cornerRadius: 28, style: .continuous)
+            .fill(.ultraThinMaterial)
             .overlay(miniPlayerSpecularAndRim(cornerRadius: 28))
-        } else {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(miniPlayerSpecularAndRim(cornerRadius: 28))
-        }
     }
 
     @ViewBuilder

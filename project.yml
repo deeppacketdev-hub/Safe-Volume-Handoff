@@ -21,6 +21,8 @@ settings:
     MARKETING_VERSION: "1.0"
     CODE_SIGN_STYLE: Automatic
     CODE_SIGNING_REQUIRED: "NO"
+    DEVELOPMENT_TEAM: RCB9V8KY57
+    CODE_SIGN_IDENTITY: "iPhone Developer"
 
 targets:
   Castlie:
@@ -35,9 +37,12 @@ targets:
       properties:
         UIBackgroundModes:
           - audio
+        NSMicrophoneUsageDescription: "Castlie потребує доступ до мікрофону для виявлення та перемикання Bluetooth-пристроїв"
+        NSBluetoothAlwaysUsageDescription: "Castlie потребує Bluetooth для підключення до аудіо-пристроїв"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.castlie.app
+        DEVELOPMENT_TEAM: RCB9V8KY57
         PRODUCT_NAME: Castlie
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor

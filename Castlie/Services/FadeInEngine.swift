@@ -11,47 +11,50 @@ class FadeInEngine {
     
     private init() {}
     
-    /// Запустити fade-in від 0 до targetVolume за duration секунд
+    /// Запустити плавний програмний fade-in (software gain AVPlayer 0.0 -> 1.0) під капотом.
+    /// Повзунок користувача та системна апаратна гучність залишаються стабільними!
     /// - Parameters:
-    ///   - targetVolume: Цільова гучність (0.0 - 1.0)
     ///   - duration: Тривалість fade-in у секундах
     ///   - audioEngine: Посилання на аудіо-движок
-    func startFadeIn(targetVolume: Float, duration: Double, audioEngine: AudioEngine) {
-        // Скасувати попередній fade-in якщо він ще йде
+    func startFadeIn(duration: Double, audioEngine: AudioEngine) {
         cancelFadeIn()
+        
+        guard duration > 0.05 else {
+            audioEngine.setSoftwareGain(1.0)
+            return
+        }
         
         isFadingIn = true
         fadeProgress = 0
+        audioEngine.setSoftwareGain(0.0)
         
-        let steps = Int(duration * 20)  // 20 кроків на секунду — плавно
-        let volumeStep = targetVolume / Float(steps)
+        let steps = max(10, Int(duration * 30))  // 30 кроків на секунду — бездоганна плавність
         let intervalNanoseconds = UInt64(duration / Double(steps) * 1_000_000_000)
         
-        audioEngine.setVolume(0)
-        
-        fadeTask = Task {
+        fadeTask = Task { @MainActor in
             for step in 1...steps {
                 guard !Task.isCancelled else { break }
                 
-                let newVolume = volumeStep * Float(step)
-                audioEngine.setVolume(min(newVolume, targetVolume))
-                fadeProgress = Float(step) / Float(steps)
+                let progress = Float(step) / Float(steps)
+                audioEngine.setSoftwareGain(progress)
+                fadeProgress = progress
                 
                 try? await Task.sleep(nanoseconds: intervalNanoseconds)
             }
             
-            // Гарантуємо що кінцева гучність точна
-            audioEngine.setVolume(targetVolume)
+            // Гарантуємо повний програмний рівень по завершенню
+            audioEngine.setSoftwareGain(1.0)
             fadeProgress = 1.0
             isFadingIn = false
         }
     }
     
-    /// Скасувати fade-in
+    /// Скасувати fade-in та миттєво повернути повне програмне підсилення 1.0
     func cancelFadeIn() {
         fadeTask?.cancel()
         fadeTask = nil
         isFadingIn = false
         fadeProgress = 0
+        AudioEngine.shared.setSoftwareGain(1.0)
     }
 }

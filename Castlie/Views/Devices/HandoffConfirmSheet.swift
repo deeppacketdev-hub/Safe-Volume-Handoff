@@ -3,6 +3,7 @@ import SwiftUI
 struct HandoffConfirmSheet: View {
     let device: AudioDevice
     @Binding var adjustedVolume: Float
+    var onVolumeChanged: ((Float) -> Void)? = nil
     let onConfirm: () -> Void
     let onCancel: () -> Void
     
@@ -36,7 +37,7 @@ struct HandoffConfirmSheet: View {
                             .foregroundStyle(ThemeManager.shared.primaryText)
                             .lineLimit(1)
 
-                        Text("Безпечна гучність перед підключенням")
+                        Text(device.type == .mac ? "Синхронізація системної гучності" : "Безпечна гучність перед підключенням")
                             .font(.system(size: 13, weight: .regular))
                             .foregroundStyle(ThemeManager.shared.secondaryText)
                     }
@@ -77,21 +78,6 @@ struct HandoffConfirmSheet: View {
                 .tint(safety.color)
 
                 SafetyIndicator(level: safety)
-
-                if adjustedVolume > safeVolume.config.effectiveMaxVolume {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color(hex: "FF9500"))
-                        Text("Вище ліміту (\(Int(safeVolume.config.effectiveMaxVolume * 100))%)")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Color(hex: "FF9500"))
-                    }
-                    .padding(.vertical, 5)
-                    .padding(.horizontal, 12)
-                    .background(Color(hex: "FF9500").opacity(0.12))
-                    .clipShape(Capsule())
-                }
             }
             .padding(16)
             .background(ThemeManager.shared.cardBackground)
@@ -113,10 +99,7 @@ struct HandoffConfirmSheet: View {
                     )
                 }
 
-                ConfigBadge(
-                    icon: "shield.fill",
-                    title: "Поріг \(Int(safeVolume.config.effectiveMaxVolume * 100))%"
-                )
+
             }
 
             Spacer(minLength: 8)
@@ -153,11 +136,8 @@ struct HandoffConfirmSheet: View {
         .padding(.horizontal, 20)
         .padding(.bottom, 24)
         .background(ThemeManager.shared.primaryBackground.ignoresSafeArea())
-        .onChange(of: adjustedVolume) { oldValue, newValue in
-            let threshold = safeVolume.config.effectiveMaxVolume
-            if oldValue <= threshold && newValue > threshold {
-                HapticFeedbackService.warning()
-            }
+        .onChange(of: adjustedVolume) { _, newVol in
+            onVolumeChanged?(newVol)
         }
     }
 }

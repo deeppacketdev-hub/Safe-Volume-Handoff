@@ -18,6 +18,8 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Castlie потребує Bluetooth для підключення до аудіо-пристроїв</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

@@ -137,6 +137,9 @@ struct DevicesView: View {
                     HandoffConfirmSheet(
                         device: device,
                         adjustedVolume: $viewModel.adjustedVolume,
+                        onVolumeChanged: { newVol in
+                            viewModel.handleAdjustedVolumeChange(newVol)
+                        },
                         onConfirm: { viewModel.confirmHandoff() },
                         onCancel: { viewModel.cancelHandoff() }
                     )
@@ -224,7 +227,10 @@ struct DevicesView: View {
                     onEditingChanged: { editing in
                         isDraggingVolume = editing
                         if editing {
+                            SystemVolumeController.shared.beginVolumeInteraction()
                             localVolume = activeVolume
+                        } else {
+                            SystemVolumeController.shared.endVolumeInteraction()
                         }
                     }
                 )
@@ -280,17 +286,32 @@ struct DevicesView: View {
             let receivers = viewModel.connectService.availableReceivers.filter {
                 $0.id != viewModel.connectService.activeRemoteDevice?.id
             }
-            let known = viewModel.discovery.knownDevices.filter {
+            let liveBluetooth = viewModel.discovery.connectedBluetoothDevices.filter {
                 $0.name.lowercased() != activeDeviceName.lowercased()
             }
-            let hasDevices = !receivers.isEmpty || !known.isEmpty || isExternalActive
+            let hasDevices = !receivers.isEmpty || !liveBluetooth.isEmpty || isExternalActive
 
             if !hasDevices {
-                Text("У цій мережі не знайдено пристроїв.")
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(theme.secondaryText)
-                    .padding(.horizontal, 4)
-                    .padding(.top, 8)
+                VStack(spacing: 8) {
+                    Image(systemName: "antenna.radiowaves.left.and.right.slash")
+                        .font(.system(size: 24))
+                        .foregroundStyle(theme.secondaryText.opacity(0.6))
+                        .padding(.top, 6)
+                    
+                    Text("Немає пристроїв онлайн")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(theme.primaryText)
+                    
+                    Text("Увімкніть Castlie на Mac або підключіть Bluetooth-пристрій через кнопку нижче.")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(theme.secondaryText)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 18)
+                .background(theme.cardBackground.opacity(0.6))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             } else {
                 Text("Виберіть пристрій")
                     .font(.system(size: 13, weight: .semibold))
@@ -298,12 +319,12 @@ struct DevicesView: View {
                     .padding(.leading, 4)
 
                 VStack(spacing: 10) {
-                    // A. Castlie Connect Receivers (Macs)
+                    // A. Castlie Connect Receivers (Macs - ONLY ONLINE)
                     ForEach(receivers) { remote in
                         CastlieDeviceRow(
                             icon: "laptopcomputer",
                             name: remote.name,
-                            subtitle: "Castlie Connect • Гучність: \(Int(remote.volume * 100))%",
+                            subtitle: "Castlie Connect • \(Int(remote.volume * 100))%",
                             volume: remote.volume,
                             isActive: false,
                             onTap: {
@@ -314,28 +335,36 @@ struct DevicesView: View {
 
                     // B. "Цей iPhone" (when external device is active, to switch back)
                     if isExternalActive {
+                        let iphoneVol = safeVolume.lastKnownVolume(for: "builtin-speaker")
+                            ?? safeVolume.lastKnownVolume(forDeviceName: "iPhone")
+                            ?? 0.35
                         CastlieDeviceRow(
                             icon: "iphone.gen3",
                             name: "Цей iPhone",
-                            subtitle: "Вбудований динамік • Гучність: \(Int(viewModel.audioEngine.volume * 100))%",
-                            volume: viewModel.audioEngine.volume,
+                            subtitle: "Вбудований динамік • \(Int(iphoneVol * 100))%",
+                            volume: iphoneVol,
                             isActive: false,
                             onTap: {
-                                if viewModel.connectService.activeRemoteDevice != nil {
-                                    viewModel.disconnectActiveRemote()
-                                }
+                                let iphoneDev = AudioDevice(
+                                    id: "builtin-speaker",
+                                    name: "Цей iPhone",
+                                    type: .iPhone,
+                                    connectionType: .builtIn,
+                                    lastKnownVolume: iphoneVol,
+                                    isConnected: false
+                                )
+                                viewModel.initiateHandoff(to: iphoneDev)
                             }
                         )
                     }
 
-                    // C. Bluetooth & AirPlay Devices (Speakers, Headphones, AirPods)
-                    ForEach(known) { dev in
+                    // C. Live Connected Bluetooth Devices (AirPods, Speakers physically connected right now)
+                    ForEach(liveBluetooth) { dev in
                         let vol = dev.lastKnownVolume ?? safeVolume.recommendedVolume(for: dev)
-                        let volLabel = dev.lastKnownVolume != nil ? "Збережена гучність" : "Безпечна гучність"
                         CastlieDeviceRow(
                             icon: dev.type.sfSymbol,
                             name: dev.name,
-                            subtitle: "\(dev.connectionType.rawValue) • \(volLabel): \(Int(vol * 100))%",
+                            subtitle: "\(dev.connectionType.rawValue) • \(Int(vol * 100))%",
                             volume: vol,
                             isActive: false,
                             onTap: {

@@ -51,6 +51,7 @@ struct VolumeSliderView: View {
                         .onChanged { value in
                             if !isDragging {
                                 isDragging = true
+                                SystemVolumeController.shared.beginVolumeInteraction()
                                 localVolume = audioEngine.volume
                                 HapticFeedbackService.light()
                             }
@@ -69,6 +70,7 @@ struct VolumeSliderView: View {
                             withAnimation(.spring(response: 0.22, dampingFraction: 0.8)) {
                                 isDragging = false
                             }
+                            SystemVolumeController.shared.endVolumeInteraction()
                             lastLevel = nil
                         }
                 )

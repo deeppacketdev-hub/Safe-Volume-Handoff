@@ -12,7 +12,8 @@ class AudioEngine {
     private(set) var currentTrack: Track?
     private(set) var currentTime: Double = 0       // Поточна позиція в секундах
     private(set) var duration: Double = 0           // Тривалість в секундах
-    private(set) var volume: Float = 0.5            // Поточна гучність 0.0 - 1.0
+    private(set) var volume: Float = 0.5            // Поточна системна апаратна гучність 0.0 - 1.0
+    private(set) var softwareGain: Float = 1.0      // Програмне підсилення для fade-in під капотом
     private(set) var currentAudioURL: URL?          // Поточне активне аудіо-посилання
     
     // MARK: - Shuffle & Repeat
@@ -310,7 +311,7 @@ class AudioEngine {
                     track: track,
                     previewURL: previewURL,
                     targetVolume: remote.volume,
-                    fadeInDuration: SafeVolumeManager.shared.config.fadeInDuration
+                    fadeInDuration: 0 // Системна гучність Mac уже налаштована й синхронізована, без скидання
                 )
                 // Запускаємо локальний приглушений плеєр (volume = 0)
                 // Це дозволяє перехоплювати фізичні кнопки гучності iPhone,
@@ -340,7 +341,23 @@ class AudioEngine {
 
         let playerItem = AVPlayerItem(url: url)
         let newPlayer = AVPlayer(playerItem: playerItem)
-        newPlayer.volume = isMutedForRemote ? 0.0 : 1.0
+        
+        if isMutedForRemote {
+            newPlayer.volume = 0.0
+            self.softwareGain = 0.0
+        } else {
+            if SafeVolumeManager.shared.config.isFadeInEnabled {
+                newPlayer.volume = 0.0
+                self.softwareGain = 0.0
+                FadeInEngine.shared.startFadeIn(
+                    duration: SafeVolumeManager.shared.config.fadeInDuration,
+                    audioEngine: self
+                )
+            } else {
+                newPlayer.volume = 1.0
+                self.softwareGain = 1.0
+            }
+        }
         self.player = newPlayer
         
         // Підписка на закінчення треку
@@ -536,26 +553,40 @@ class AudioEngine {
     
     /// Встановити гучність (0.0 - 1.0)
     func setVolume(_ newVolume: Float) {
+        // Миттєве скасування активного fade-in при ручному керуванні користувачем
+        FadeInEngine.shared.cancelFadeIn()
+        
         let clamped = max(0, min(1, newVolume))
         volume = clamped
         
         if let remote = CastlieConnectService.shared.activeRemoteDevice {
             player?.volume = 0
             CastlieConnectService.shared.setRemoteVolume(deviceId: remote.id, volume: clamped)
+            SafeVolumeManager.shared.updateDeviceVolume(
+                deviceId: remote.id,
+                deviceName: remote.name,
+                volume: clamped
+            )
             isReceivingRemoteVolumeUpdate = true
             SystemVolumeController.shared.setSystemVolume(clamped)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 self?.isReceivingRemoteVolumeUpdate = false
             }
         } else {
-            player?.volume = clamped
             SystemVolumeController.shared.setSystemVolume(clamped)
+            if let cur = DeviceDiscoveryService.shared.currentDevice {
+                SafeVolumeManager.shared.updateDeviceVolume(
+                    deviceId: cur.id,
+                    deviceName: cur.name,
+                    volume: clamped
+                )
+            }
         }
     }
     
     /// Синхронізація зі змінами апаратної системної гучності (фізичні кнопки iPhone, Mac тощо)
     func syncSystemVolume(_ sysVolume: Float) {
-        guard !isReceivingRemoteVolumeUpdate else { return }
+        guard !isReceivingRemoteVolumeUpdate, !DeviceDiscoveryService.shared.isHandoffSwitching else { return }
         let clamped = max(0, min(1, sysVolume))
         volume = clamped
         
@@ -563,8 +594,28 @@ class AudioEngine {
             // REMOTE IS ACTIVE: Звук на динаміку iPhone приглушений (0), гучність передається на Mac в реальному часі!
             player?.volume = 0
             CastlieConnectService.shared.setRemoteVolume(deviceId: remote.id, volume: clamped)
+            SafeVolumeManager.shared.updateDeviceVolume(
+                deviceId: remote.id,
+                deviceName: remote.name,
+                volume: clamped
+            )
         } else {
-            player?.volume = 1.0
+            if let cur = DeviceDiscoveryService.shared.currentDevice {
+                SafeVolumeManager.shared.updateDeviceVolume(
+                    deviceId: cur.id,
+                    deviceName: cur.name,
+                    volume: clamped
+                )
+            }
+        }
+    }
+    
+    /// Встановити софтверний рівень AVPlayer для fade-in під капотом (не рухає системну гучність та UI)
+    func setSoftwareGain(_ gain: Float) {
+        let clamped = max(0, min(1, gain))
+        softwareGain = clamped
+        if CastlieConnectService.shared.activeRemoteDevice == nil {
+            player?.volume = clamped
         }
     }
     
@@ -581,7 +632,7 @@ class AudioEngine {
     
     /// Відновлення нормальної локальної гучності після відключення Mac
     func handleRemoteDisconnected() {
-        player?.volume = volume
+        player?.volume = 1.0
         SystemVolumeController.shared.setSystemVolume(volume)
     }
     

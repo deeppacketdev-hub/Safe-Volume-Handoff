@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import Observation
 
 @Observable
@@ -15,7 +16,7 @@ class DeviceManagerViewModel {
     var showHandoffConfirm = false
     var adjustedVolume: Float = 0.3
     
-    /// Почати налаштування безпечної гучності для звичайного аудіопристрою
+    /// Почати налаштування гучності для звичайного аудіопристрою
     func initiateHandoff(to device: AudioDevice) {
         selectedDevice = device
         selectedRemoteDevice = nil
@@ -27,7 +28,7 @@ class DeviceManagerViewModel {
         }
     }
     
-    /// Почати Safe Handoff для пристрою Castlie Connect (Mac)
+    /// Почати Handoff для пристрою Castlie Connect (Mac)
     func initiateRemoteHandoff(to remote: CastlieRemoteDevice) {
         selectedRemoteDevice = remote
         selectedDevice = AudioDevice(
@@ -39,8 +40,7 @@ class DeviceManagerViewModel {
             lastKnownVolume: remote.volume,
             isConnected: remote.isPlaying
         )
-        // Рекомендована безпечна гучність з урахуванням Night Mode та порогу
-        adjustedVolume = min(remote.volume, safeVolume.config.effectiveMaxVolume)
+        adjustedVolume = remote.volume
         if safeVolume.config.requireConfirmation {
             showHandoffConfirm = true
         } else {
@@ -48,12 +48,36 @@ class DeviceManagerViewModel {
         }
     }
     
-    /// Підтвердити безпечну гучність
+    /// Обробка зміни повзунка в HandoffConfirmSheet у реальному часі
+    func handleAdjustedVolumeChange(_ newVol: Float) {
+        let clamped = max(0, min(1, newVol))
+        adjustedVolume = clamped
+        
+        // Для пристроїв Castlie Connect (Mac) одразу передаємо команду в реальному часі
+        // Це змінює СИСТЕМНУ гучність на Mac ще ДО підтвердження підключення
+        if let remote = selectedRemoteDevice {
+            connectService.setRemoteVolume(deviceId: remote.id, volume: clamped)
+        }
+    }
+    
+    /// Підтвердити гучність та підключитись
     func confirmHandoff() {
         let targetVol = max(0, min(1, adjustedVolume))
         
         // 1. Якщо це Castlie Connect пристрій (Mac)
         if let remote = selectedRemoteDevice {
+            // Зберігаємо поточний локальний пристрій перед перемиканням на Mac
+            if let cur = discovery.currentDevice {
+                safeVolume.updateDeviceVolume(
+                    deviceId: cur.id,
+                    deviceName: cur.name,
+                    volume: audioEngine.volume
+                )
+                if cur.connectionType == .bluetooth {
+                    discovery.preserveBluetoothDevice(cur)
+                }
+            }
+            
             safeVolume.recordConnection(
                 deviceId: remote.id,
                 deviceName: remote.name,
@@ -64,9 +88,11 @@ class DeviceManagerViewModel {
             var updatedRemote = remote
             updatedRemote.volume = targetVol
             connectService.connectToRemote(device: updatedRemote)
+            
+            // Фіксуємо гучність у реальному часі
             connectService.setRemoteVolume(deviceId: remote.id, volume: targetVol)
             
-            // Якщо на телефоні є трек (або в черзі), запускаємо його через AudioEngine
+            // Якщо на телефоні є трек — запускаємо на Mac
             let trackToPlay = audioEngine.currentTrack ?? audioEngine.queue.first
             if let track = trackToPlay {
                 audioEngine.play(track: track)
@@ -82,26 +108,30 @@ class DeviceManagerViewModel {
         // 2. Якщо це звичайний локальний / Bluetooth пристрій
         guard let device = selectedDevice else { return }
         
-        safeVolume.recordConnection(
-            deviceId: device.id,
-            deviceName: device.name,
-            volume: targetVol
-        )
+        // Якщо ми були підключені до Mac — відключаємо його
+        if connectService.activeRemoteDevice != nil {
+            connectService.disconnectActiveRemote()
+        }
         
         let currentNameNorm = discovery.currentDevice?.name.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
         let devNameNorm = device.name.trimmingCharacters(in: .whitespaces).lowercased()
         let isCurrent = (device.id == discovery.currentDevice?.id) || (!devNameNorm.isEmpty && devNameNorm == currentNameNorm)
         
-        if isCurrent {
-            if safeVolume.config.isFadeInEnabled {
-                fadeIn.startFadeIn(
-                    targetVolume: targetVol,
-                    duration: safeVolume.config.fadeInDuration,
-                    audioEngine: audioEngine
-                )
-            } else {
-                audioEngine.setVolume(targetVol)
-            }
+        if device.type == .iPhone || device.id == "builtin-speaker" || devNameNorm == "iphone" || devNameNorm == "цей iphone" {
+            // Перемикання на динамік iPhone із вказаною цільовою гучністю
+            discovery.switchToBuiltInSpeaker(targetVolume: targetVol)
+        } else if isCurrent {
+            // Пристрій вже активний — просто оновлюємо гучність
+            audioEngine.setVolume(targetVol)
+            safeVolume.updateDeviceVolume(deviceId: device.id, deviceName: device.name, volume: targetVol)
+        } else {
+            // Перемикаємо на Bluetooth пристрій із вказаною цільовою гучністю
+            discovery.switchToBluetoothDevice(device, targetVolume: targetVol)
+        }
+        
+        // Якщо відтворення не активне або ми перемкнулись з Mac, відновлюємо локальне відтворення
+        if !audioEngine.isPlaying, let track = audioEngine.currentTrack ?? audioEngine.queue.first {
+            audioEngine.play(track: track)
         }
         
         HapticFeedbackService.success()
@@ -121,5 +151,18 @@ class DeviceManagerViewModel {
     func disconnectActiveRemote() {
         connectService.disconnectActiveRemote()
         HapticFeedbackService.light()
+    }
+    
+    /// Перемкнути аудіо-вихід на вбудований динамік iPhone (з Bluetooth колонки/навушників)
+    func switchToBuiltInSpeaker() {
+        // 1. Відключити Castlie Remote (Mac) якщо активний
+        if connectService.activeRemoteDevice != nil {
+            connectService.disconnectActiveRemote()
+        }
+        
+        // 2. Перемкнути системний аудіо-маршрут на вбудований динамік з відновленням його гучності
+        discovery.switchToBuiltInSpeaker()
+        
+        HapticFeedbackService.success()
     }
 }

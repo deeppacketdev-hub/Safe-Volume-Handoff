@@ -251,10 +251,16 @@ final class CastlieConnectService: NSObject {
         case "devices_list":
             if let list = json["devices"] as? [[String: Any]] {
                 var receivers: [CastlieRemoteDevice] = []
+                var seenNames = Set<String>()
                 for item in list {
                     if let role = item["role"] as? String, role == "receiver",
                        let id = item["deviceId"] as? String,
                        let name = item["name"] as? String {
+                        // Дедуплікація по імені — один Mac не повинен з'являтися двічі
+                        let nameNorm = name.trimmingCharacters(in: .whitespaces).lowercased()
+                        guard !seenNames.contains(nameNorm) else { continue }
+                        seenNames.insert(nameNorm)
+                        
                         let vol = (item["volume"] as? NSNumber)?.floatValue ?? 0.5
                         let isPlaying = (item["isPlaying"] as? Bool) ?? false
                         receivers.append(CastlieRemoteDevice(
@@ -292,11 +298,12 @@ final class CastlieConnectService: NSObject {
                     connectedUser: item["connectedUser"] as? String,
                     isOnline: true
                 )
-                if let idx = availableReceivers.firstIndex(where: { $0.id == id }) {
-                    availableReceivers[idx] = newDev
-                } else {
-                    availableReceivers.append(newDev)
-                }
+                // Дедуплікація: видаляємо старі записи з тим же id АБО тим же ім'ям
+                let nameNorm = name.trimmingCharacters(in: .whitespaces).lowercased()
+                availableReceivers.removeAll(where: {
+                    $0.id == id || $0.name.trimmingCharacters(in: .whitespaces).lowercased() == nameNorm
+                })
+                availableReceivers.append(newDev)
             }
             
         case "device_left":

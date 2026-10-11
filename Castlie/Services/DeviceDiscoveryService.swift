@@ -9,23 +9,45 @@ class DeviceDiscoveryService {
     
     private(set) var currentDevice: AudioDevice?
     private(set) var isAirPlayAvailable = false
-    var showMockDevices: Bool = true {
-        didSet {
-            UserDefaults.standard.set(showMockDevices, forKey: "ShowMockDevices")
-        }
-    }
+    
+    /// Зберігає останній реально підключений Bluetooth пристрій,
+    /// щоб коли звук перемикається на динамік iPhone або на Mac,
+    /// колонка залишалася видимою у списку пристроїв для повернення звуку на неї.
+    private(set) var connectedBluetoothDevice: AudioDevice?
+    private(set) var isSpeakerOverridden: Bool = false
+    
+    /// Прапорець перемикання маршруту — запобігає перетиранню гучності проміжними KVO-подіями
+    private(set) var isHandoffSwitching: Bool = false
+    private(set) var pendingTargetVolume: Float?
+    private(set) var pendingTargetDeviceId: String?
     
     private let routeDetector = AVRouteDetector()
     private var routeChangeObserver: NSObjectProtocol?
     private var airplayObserver: NSObjectProtocol?
     
-    private init() {
-        if UserDefaults.standard.object(forKey: "ShowMockDevices") != nil {
-            showMockDevices = UserDefaults.standard.bool(forKey: "ShowMockDevices")
+    private let lastBtDeviceKey = "Castlie_LastConnectedBluetoothDevice"
+    
+    private func saveLastConnectedBluetoothDevice(_ device: AudioDevice?) {
+        if let device, let data = try? JSONEncoder().encode(device) {
+            UserDefaults.standard.set(data, forKey: lastBtDeviceKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: lastBtDeviceKey)
         }
+    }
+    
+    private static func loadLastConnectedBluetoothDevice() -> AudioDevice? {
+        guard let data = UserDefaults.standard.data(forKey: "Castlie_LastConnectedBluetoothDevice"),
+              let dev = try? JSONDecoder().decode(AudioDevice.self, from: data) else {
+            return nil
+        }
+        return dev
+    }
+    
+    private init() {
+        self.connectedBluetoothDevice = Self.loadLastConnectedBluetoothDevice()
         setupRouteDetector()
         setupRouteChangeListener()
-        updateCurrentRoute()
+        updateCurrentRoute(syncVolume: false)
     }
     
     // MARK: - Route Detection
@@ -52,15 +74,24 @@ class DeviceDiscoveryService {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            let previousOutputId = (notification.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription)?.outputs.first?.uid
+            let prevOutput = (notification.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription)?.outputs.first
+            let previousOutputId = prevOutput?.uid
+            let previousOutputName = prevOutput?.portName
+            let reasonValue = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            let reason = reasonValue != nil ? AVAudioSession.RouteChangeReason(rawValue: reasonValue!) : nil
+            
             Task { @MainActor in
-                self?.handleAudioRouteChange(previousOutputId: previousOutputId)
+                self?.handleAudioRouteChange(
+                    previousOutputId: previousOutputId,
+                    previousOutputName: previousOutputName,
+                    reason: reason
+                )
             }
         }
     }
     
     /// Оновити інформацію про поточний аудіо-маршрут
-    func updateCurrentRoute() {
+    func updateCurrentRoute(syncVolume: Bool = true) {
         let session = AVAudioSession.sharedInstance()
         let currentRoute = session.currentRoute
         
@@ -101,11 +132,12 @@ class DeviceDiscoveryService {
                 }
             }
             
-            // Реальна апаратна гучність підключеного пристрою (Mac, AirPlay, Bluetooth або динамік)
-            let realHardwareVolume = AVAudioSession.sharedInstance().outputVolume
-            AudioEngine.shared.syncSystemVolume(realHardwareVolume)
+            let realHardwareVolume = session.outputVolume
+            if syncVolume && !isHandoffSwitching {
+                AudioEngine.shared.syncSystemVolume(realHardwareVolume)
+            }
             
-            currentDevice = AudioDevice(
+            let newDevice = AudioDevice(
                 id: output.uid,
                 name: output.portName,
                 type: deviceType,
@@ -113,9 +145,20 @@ class DeviceDiscoveryService {
                 lastKnownVolume: realHardwareVolume,
                 isConnected: true
             )
+            
+            currentDevice = newDevice
+            
+            // Якщо зараз активно грає через Bluetooth — фіксуємо його
+            if connectionType == .bluetooth {
+                connectedBluetoothDevice = newDevice
+                saveLastConnectedBluetoothDevice(newDevice)
+                isSpeakerOverridden = false
+            }
         } else {
-            let realHardwareVolume = AVAudioSession.sharedInstance().outputVolume
-            AudioEngine.shared.syncSystemVolume(realHardwareVolume)
+            let realHardwareVolume = session.outputVolume
+            if syncVolume && !isHandoffSwitching {
+                AudioEngine.shared.syncSystemVolume(realHardwareVolume)
+            }
             
             currentDevice = AudioDevice(
                 id: "builtin-speaker",
@@ -130,127 +173,136 @@ class DeviceDiscoveryService {
         isAirPlayAvailable = routeDetector.multipleRoutesDetected
     }
     
-    /// Обробка реальної зміни аудіо-маршруту (підключення навушників, AirPlay, Bluetooth)
-    private func handleAudioRouteChange(previousOutputId: String?) {
-        updateCurrentRoute()
-        
-        // Отримуємо реальну актуальну гучність підключеного пристрою
-        let realHardwareVolume = AVAudioSession.sharedInstance().outputVolume
-        AudioEngine.shared.syncSystemVolume(realHardwareVolume)
-        
-        if let current = currentDevice, current.id != previousOutputId {
-            let maxSafe = SafeVolumeManager.shared.config.effectiveMaxVolume
-            if realHardwareVolume > maxSafe {
-                // Захищаємо слух, якщо пристрій підключився на небезпечно високій гучності
-                applySafeVolumeHandoff(for: current)
-            } else {
-                // Фіксуємо поточну реальну гучність пристрою
-                SafeVolumeManager.shared.recordConnection(
-                    deviceId: current.id,
-                    deviceName: current.name,
-                    volume: realHardwareVolume
-                )
-                HapticFeedbackService.light()
+    /// Обробка реальної зміни аудіо-маршруту
+    private func handleAudioRouteChange(
+        previousOutputId: String?,
+        previousOutputName: String?,
+        reason: AVAudioSession.RouteChangeReason?
+    ) {
+        // Якщо пристрій фізично вимкнули або роз'єднали — видаляємо його
+        if reason == .oldDeviceUnavailable {
+            if let prevId = previousOutputId, connectedBluetoothDevice?.id == prevId {
+                connectedBluetoothDevice = nil
+                saveLastConnectedBluetoothDevice(nil)
+                isSpeakerOverridden = false
+            } else if let prevName = previousOutputName?.lowercased(),
+                      connectedBluetoothDevice?.name.lowercased() == prevName {
+                connectedBluetoothDevice = nil
+                saveLastConnectedBluetoothDevice(nil)
+                isSpeakerOverridden = false
             }
         }
-    }
-    
-    /// Безпечне перемикання гучності при підключенні пристрою
-    func applySafeVolumeHandoff(for device: AudioDevice) {
-        let safeVolume = SafeVolumeManager.shared
-        let audioEngine = AudioEngine.shared
-        let fadeIn = FadeInEngine.shared
         
-        // Рекомендована безпечна гучність
-        let safeVol = safeVolume.recommendedVolume(for: device)
+        updateCurrentRoute()
         
-        // Фіксація в історії
-        safeVolume.recordConnection(
-            deviceId: device.id,
-            deviceName: device.name,
-            volume: safeVol
-        )
+        guard let current = currentDevice else { return }
+        let isRealDeviceChange = (current.id != previousOutputId)
         
-        // Fade-in або встановлення гучності
-        if safeVolume.config.isFadeInEnabled {
-            fadeIn.startFadeIn(
-                targetVolume: safeVol,
-                duration: safeVolume.config.fadeInDuration,
-                audioEngine: audioEngine
+        if isHandoffSwitching, let targetVol = pendingTargetVolume {
+            // Програмне перемикання: гарантовано застосовуємо вибрану користувачем гучність
+            SystemVolumeController.shared.setSystemVolume(targetVol)
+            AudioEngine.shared.setVolume(targetVol)
+            SafeVolumeManager.shared.updateDeviceVolume(
+                deviceId: current.id,
+                deviceName: current.name,
+                volume: targetVol
             )
-        } else {
-            audioEngine.setVolume(safeVol)
+        } else if isRealDeviceChange && reason != .categoryChange {
+            // Зовнішня зміна маршруту (наприклад, користувач підключив навушники)
+            let savedVol = SafeVolumeManager.shared.lastKnownVolume(for: current)
+                ?? SafeVolumeManager.shared.recommendedVolume(for: current)
+            
+            SystemVolumeController.shared.setSystemVolume(savedVol)
+            AudioEngine.shared.setVolume(savedVol)
+            SafeVolumeManager.shared.updateDeviceVolume(
+                deviceId: current.id,
+                deviceName: current.name,
+                volume: savedVol
+            )
+            
+            if AudioEngine.shared.isPlaying && SafeVolumeManager.shared.config.isFadeInEnabled {
+                FadeInEngine.shared.startFadeIn(
+                    duration: SafeVolumeManager.shared.config.fadeInDuration,
+                    audioEngine: AudioEngine.shared
+                )
+            }
+            
+            HapticFeedbackService.light()
         }
-        
-        HapticFeedbackService.success()
     }
     
-    // MARK: - Real Known Devices from History
+    /// Зберегти Bluetooth-пристрій у пам'яті для подальшого швидкого повернення
+    func preserveBluetoothDevice(_ device: AudioDevice) {
+        if device.connectionType == .bluetooth {
+            self.connectedBluetoothDevice = device
+            saveLastConnectedBluetoothDevice(device)
+        }
+    }
     
-    /// Повертає збережені реальні пристрої з історії підключень без дублікатів
-    var knownDevices: [AudioDevice] {
-        let histories = SafeVolumeManager.shared.deviceHistories
-        var seenNames = Set<String>()
-        var seenIds = Set<String>()
+    // MARK: - Live Connected Bluetooth Devices (ONLY physically connected right now)
+    
+    /// Повертає ТІЛЬКИ ті Bluetooth-пристрої, які ФІЗИЧНО підключені та готові до роботи в цей момент.
+    /// Залишається видимим навіть при перемиканні на Mac або динамік iPhone!
+    var connectedBluetoothDevices: [AudioDevice] {
         var result: [AudioDevice] = []
+        var seenNames = Set<String>()
         
         let currentNameNorm = currentDevice?.name.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
         let currentId = currentDevice?.id ?? ""
+        let isRemoteActive = CastlieConnectService.shared.activeRemoteDevice != nil
         
-        let sortedHistories = histories.sorted { $0.timestamp > $1.timestamp }
-        
-        for entry in sortedHistories {
-            let nameNorm = entry.deviceName.trimmingCharacters(in: .whitespaces).lowercased()
-            
-            // Якщо це поточний активний пристрій — не показуємо в збережених
-            if (!currentNameNorm.isEmpty && nameNorm == currentNameNorm) || (!currentId.isEmpty && entry.deviceId == currentId) {
-                continue
-            }
-            
-            // Уникаємо дублювання за назвою або ID
-            guard !seenNames.contains(nameNorm) && !seenIds.contains(entry.deviceId) else { continue }
-            seenNames.insert(nameNorm)
-            seenIds.insert(entry.deviceId)
-            
-            let deviceType: DeviceType
-            let connectionType: AudioDevice.ConnectionType
-            
-            if nameNorm.contains("mac") || nameNorm.contains("macbook") {
-                deviceType = .mac
-                connectionType = .airplay
-            } else if nameNorm.contains("airpod") || nameNorm.contains("headphone") || nameNorm.contains("навушник") {
-                deviceType = .headphones
-                connectionType = .bluetooth
-            } else if nameNorm.contains("tv") || nameNorm.contains("телевізор") {
-                deviceType = .tv
-                connectionType = .airplay
-            } else if nameNorm.contains("speaker") || nameNorm.contains("колонк") || nameNorm.contains("jbl") {
-                deviceType = .speaker
-                connectionType = .bluetooth
-            } else if nameNorm.contains("iphone") {
-                deviceType = .iPhone
-                connectionType = .builtIn
-            } else {
-                deviceType = .speaker
-                connectionType = .bluetooth
-            }
-            
-            result.append(AudioDevice(
-                id: entry.deviceId,
-                name: entry.deviceName,
-                type: deviceType,
-                connectionType: connectionType,
-                lastKnownVolume: entry.volume,
-                isConnected: false
-            ))
+        if !currentNameNorm.isEmpty && !isRemoteActive {
+            seenNames.insert(currentNameNorm)
         }
         
-        // Mock-пристрої для демонстрації Safe Volume Handoff
-        if showMockDevices {
-            for mock in mockDevices {
-                let mockNameNorm = mock.name.trimmingCharacters(in: .whitespaces).lowercased()
-                if !seenNames.contains(mockNameNorm) && mock.id != currentId && mockNameNorm != currentNameNorm {
-                    result.append(mock)
+        // 1. Якщо активний Mac, а поточний маршрут iPhone — це Bluetooth колонка:
+        if isRemoteActive, let cur = currentDevice, cur.connectionType == .bluetooth {
+            let nameNorm = cur.name.trimmingCharacters(in: .whitespaces).lowercased()
+            if !seenNames.contains(nameNorm) {
+                seenNames.insert(nameNorm)
+                var dev = cur
+                dev.lastKnownVolume = SafeVolumeManager.shared.lastKnownVolume(for: cur) ?? cur.lastKnownVolume
+                result.append(dev)
+            }
+        }
+        
+        // 2. Останній підключений або збережений Bluetooth пристрій (колонка або навушники):
+        if let btDev = connectedBluetoothDevice {
+            let nameNorm = btDev.name.trimmingCharacters(in: .whitespaces).lowercased()
+            let isCurrentLocal = (nameNorm == currentNameNorm || btDev.id == currentId)
+            
+            // Показуємо пристрій, якщо:
+            // а) зараз активний Mac (щоб можна було повернутись на Bluetooth-колонку)
+            // б) або локально активний динамік iPhone (Bluetooth-колонка не грає прямо зараз)
+            if (isRemoteActive || !isCurrentLocal) && !seenNames.contains(nameNorm) {
+                seenNames.insert(nameNorm)
+                var dev = btDev
+                dev.lastKnownVolume = SafeVolumeManager.shared.lastKnownVolume(for: btDev) ?? btDev.lastKnownVolume
+                result.append(dev)
+            }
+        }
+        
+        // 3. Реально підключені аудіопорти з AVAudioSession
+        let session = AVAudioSession.sharedInstance()
+        for output in session.currentRoute.outputs {
+            if output.portType == .bluetoothA2DP || output.portType == .bluetoothLE || output.portType == .bluetoothHFP {
+                let name = output.portName
+                let nameNorm = name.trimmingCharacters(in: .whitespaces).lowercased()
+                let isCurrentLocal = (nameNorm == currentNameNorm || output.uid == currentId)
+                if (isRemoteActive || !isCurrentLocal) && !seenNames.contains(nameNorm) {
+                    seenNames.insert(nameNorm)
+                    let vol = SafeVolumeManager.shared.lastKnownVolume(for: output.uid)
+                        ?? SafeVolumeManager.shared.lastKnownVolume(forDeviceName: name)
+                        ?? session.outputVolume
+                    let devType: DeviceType = nameNorm.contains("airpod") || nameNorm.contains("headphone") ? .headphones : .speaker
+                    result.append(AudioDevice(
+                        id: output.uid,
+                        name: name,
+                        type: devType,
+                        connectionType: .bluetooth,
+                        lastKnownVolume: vol,
+                        isConnected: true
+                    ))
                 }
             }
         }
@@ -258,57 +310,119 @@ class DeviceDiscoveryService {
         return result
     }
     
-    // MARK: - Mock Devices
+    // MARK: - System Audio Route Switching
     
-    private var mockDevices: [AudioDevice] {
-        let safeVolume = SafeVolumeManager.shared
-        return [
-            AudioDevice(
-                id: "mock-jbl",
-                name: "JBL Flip 6",
-                type: .speaker,
-                connectionType: .bluetooth,
-                roomName: "Кімната",
-                lastKnownVolume: safeVolume.lastKnownVolume(for: "mock-jbl") ?? 0.35,
-                isConnected: false
-            ),
-            AudioDevice(
-                id: "mock-tv",
-                name: "Samsung TV",
-                type: .tv,
-                connectionType: .airplay,
-                roomName: "Вітальня",
-                lastKnownVolume: safeVolume.lastKnownVolume(for: "mock-tv") ?? 0.72,
-                isConnected: false
-            ),
-            AudioDevice(
-                id: "mock-homepod",
-                name: "HomePod mini",
-                type: .speaker,
-                connectionType: .airplay,
-                roomName: "Кухня",
-                lastKnownVolume: safeVolume.lastKnownVolume(for: "mock-homepod") ?? 0.25,
-                isConnected: false
-            ),
-            AudioDevice(
-                id: "mock-airpods",
-                name: "AirPods Pro",
-                type: .headphones,
-                connectionType: .bluetooth,
-                roomName: "Особисті",
-                lastKnownVolume: safeVolume.lastKnownVolume(for: "mock-airpods") ?? 0.5,
-                isConnected: false
+    /// Перемкнути аудіо-вихід на Bluetooth-пристрій із незалежною гучністю
+    func switchToBluetoothDevice(_ device: AudioDevice, targetVolume: Float? = nil) {
+        let session = AVAudioSession.sharedInstance()
+        
+        // 1. Зберігаємо поточний пристрій і його гучність перед перемиканням
+        if let cur = currentDevice {
+            SafeVolumeManager.shared.updateDeviceVolume(
+                deviceId: cur.id,
+                deviceName: cur.name,
+                volume: AudioEngine.shared.volume
             )
-        ]
+        }
+        
+        // 2. Визначаємо цільову гучність для Bluetooth пристрою
+        let desiredVolume = targetVolume
+            ?? SafeVolumeManager.shared.lastKnownVolume(for: device)
+            ?? SafeVolumeManager.shared.recommendedVolume(for: device)
+        
+        isHandoffSwitching = true
+        pendingTargetVolume = desiredVolume
+        pendingTargetDeviceId = device.id
+        isSpeakerOverridden = false
+        
+        // 3. Скидаємо override динаміка якщо він був активний
+        try? session.overrideOutputAudioPort(.none)
+        
+        print("[Discovery] ✅ Системно перемкнуто звук на Bluetooth: \(device.name), гучність: \(Int(desiredVolume * 100))%")
+        
+        // 4. Застосовуємо вибрану гучність до системи та збереження
+        SystemVolumeController.shared.setSystemVolume(desiredVolume)
+        AudioEngine.shared.setVolume(desiredVolume)
+        SafeVolumeManager.shared.updateDeviceVolume(
+            deviceId: device.id,
+            deviceName: device.name,
+            volume: desiredVolume
+        )
+        
+        connectedBluetoothDevice = device
+        saveLastConnectedBluetoothDevice(device)
+        
+        if AudioEngine.shared.isPlaying && SafeVolumeManager.shared.config.isFadeInEnabled {
+            FadeInEngine.shared.startFadeIn(
+                duration: SafeVolumeManager.shared.config.fadeInDuration,
+                audioEngine: AudioEngine.shared
+            )
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self else { return }
+            self.updateCurrentRoute()
+            SystemVolumeController.shared.setSystemVolume(desiredVolume)
+            self.isHandoffSwitching = false
+            self.pendingTargetVolume = nil
+            self.pendingTargetDeviceId = nil
+        }
     }
     
-    /// Всі доступні та збережені пристрої
-    var allDevices: [AudioDevice] {
-        var devices: [AudioDevice] = []
+    /// Перемкнути аудіо-вихід назад на вбудований динамік iPhone із відновленням його гучності
+    func switchToBuiltInSpeaker(targetVolume: Float? = nil) {
+        let session = AVAudioSession.sharedInstance()
+        
+        // 1. Зберігаємо поточний Bluetooth пристрій та його гучність перед перемиканням
         if let current = currentDevice {
-            devices.append(current)
+            SafeVolumeManager.shared.updateDeviceVolume(
+                deviceId: current.id,
+                deviceName: current.name,
+                volume: AudioEngine.shared.volume
+            )
+            if current.connectionType == .bluetooth {
+                preserveBluetoothDevice(current)
+            }
         }
-        devices.append(contentsOf: knownDevices)
-        return devices
+        
+        // 2. Визначаємо збережену незалежну гучність для iPhone
+        let iphoneVolume = targetVolume
+            ?? SafeVolumeManager.shared.lastKnownVolume(for: "builtin-speaker")
+            ?? SafeVolumeManager.shared.lastKnownVolume(forDeviceName: "iPhone")
+            ?? 0.35
+        
+        isHandoffSwitching = true
+        pendingTargetVolume = iphoneVolume
+        pendingTargetDeviceId = "builtin-speaker"
+        isSpeakerOverridden = true
+        
+        // Спробуємо активувати override динаміка
+        try? session.overrideOutputAudioPort(.speaker)
+        print("[Discovery] ✅ Системно перемкнуто на вбудований динамік iPhone, гучність: \(Int(iphoneVolume * 100))%")
+        
+        // 3. Застосовуємо відновлену гучність iPhone
+        SystemVolumeController.shared.setSystemVolume(iphoneVolume)
+        AudioEngine.shared.setVolume(iphoneVolume)
+        SafeVolumeManager.shared.updateDeviceVolume(
+            deviceId: "builtin-speaker",
+            deviceName: "iPhone",
+            volume: iphoneVolume
+        )
+        
+        if AudioEngine.shared.isPlaying && SafeVolumeManager.shared.config.isFadeInEnabled {
+            FadeInEngine.shared.startFadeIn(
+                duration: SafeVolumeManager.shared.config.fadeInDuration,
+                audioEngine: AudioEngine.shared
+            )
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self else { return }
+            self.updateCurrentRoute()
+            SystemVolumeController.shared.setSystemVolume(iphoneVolume)
+            self.isHandoffSwitching = false
+            self.pendingTargetVolume = nil
+            self.pendingTargetDeviceId = nil
+        }
     }
 }

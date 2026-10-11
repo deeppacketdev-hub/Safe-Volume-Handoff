@@ -1,5 +1,7 @@
 import AppKit
 import AVFoundation
+import CoreAudio
+import AudioToolbox
 import Foundation
 import Observation
 
@@ -16,27 +18,147 @@ final class MacAudioPlayer {
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
-    private var fadeTask: Task<Void, Never>?
     
     private init() {
-        // Default initial volume
-        self.volume = 0.5
+        self.volume = Self.getMacSystemVolume()
     }
     
-    /// Play a track preview URL with Safe Fade-In
-    func play(url: URL, targetVolume: Float, fadeInDuration: Double) {
-        fadeTask?.cancel()
+    /// Отримати поточну реальну системну гучність macOS (0.0 - 1.0)
+    static func getMacSystemVolume() -> Float {
+        var defaultOutputDeviceID = AudioDeviceID(0)
+        var defaultOutputDeviceIDSize = UInt32(MemoryLayout.size(ofValue: defaultOutputDeviceID))
+        var getDefaultOutputDevicePropertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let status1 = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &getDefaultOutputDevicePropertyAddress,
+            0,
+            nil,
+            &defaultOutputDeviceIDSize,
+            &defaultOutputDeviceID
+        )
+        if status1 == noErr {
+            var volumePropertyAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+                mScope: kAudioDevicePropertyScopeOutput,
+                mElement: kAudioObjectPropertyElementMain
+            )
+
+            var vol: Float32 = 0
+            var volSize = UInt32(MemoryLayout.size(ofValue: vol))
+            let status2 = AudioObjectGetPropertyData(
+                defaultOutputDeviceID,
+                &volumePropertyAddress,
+                0,
+                nil,
+                &volSize,
+                &vol
+            )
+            if status2 == noErr {
+                return max(0, min(1, Float(vol)))
+            }
+        }
+        
+        // Fallback: AppleScript
+        let script = NSAppleScript(source: "output volume of (get volume settings)")
+        var error: NSDictionary?
+        if let result = script?.executeAndReturnError(&error) {
+            let val = result.int32Value
+            return max(0, min(1, Float(val) / 100.0))
+        }
+        return 0.5
+    }
+    
+    /// Змінити реальну СИСТЕМНУ гучність macOS (CoreAudio + AppleScript fallback)
+    static func setMacSystemVolume(_ volume: Float) {
+        let clamped = max(0, min(1, volume))
+        
+        // 1. Надшвидкий нативний CoreAudio (0 мікросекунд, без затримок)
+        var defaultOutputDeviceID = AudioDeviceID(0)
+        var defaultOutputDeviceIDSize = UInt32(MemoryLayout.size(ofValue: defaultOutputDeviceID))
+        var getDefaultOutputDevicePropertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let status1 = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &getDefaultOutputDevicePropertyAddress,
+            0,
+            nil,
+            &defaultOutputDeviceIDSize,
+            &defaultOutputDeviceID
+        )
+        if status1 == noErr {
+            var volumePropertyAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+                mScope: kAudioDevicePropertyScopeOutput,
+                mElement: kAudioObjectPropertyElementMain
+            )
+
+            var vol: Float32 = clamped
+            let volSize = UInt32(MemoryLayout.size(ofValue: vol))
+            let status2 = AudioObjectSetPropertyData(
+                defaultOutputDeviceID,
+                &volumePropertyAddress,
+                0,
+                nil,
+                volSize,
+                &vol
+            )
+            if status2 == noErr {
+                return
+            }
+        }
+        
+        // 2. Fallback через AppleScript якщо пристрій не підтримує VirtualMainVolume
+        let intVolume = Int(clamped * 100)
+        DispatchQueue.global(qos: .userInteractive).async {
+            let script = NSAppleScript(source: "set volume output volume \(intVolume)")
+            var error: NSDictionary?
+            script?.executeAndReturnError(&error)
+            if let error {
+                print("[MacAudioPlayer] AppleScript volume error: \(error)")
+            }
+        }
+    }
+    
+    private var fadeTask: Task<Void, Never>?
+    
+    func setVolume(_ newVolume: Float) {
+        cancelFadeIn()
+        let clamped = max(0, min(1, newVolume))
+        self.volume = clamped
+        player?.volume = 1.0
+        Self.setMacSystemVolume(clamped)
+    }
+    
+    /// Відтворення аудіо на Mac із можливим софтверним fade-in під капотом
+    func play(url: URL, targetVolume: Float, fadeInDuration: Double = 0) {
         stop()
         
         let clampedTarget = max(0, min(1, targetVolume))
+        self.volume = clampedTarget
+        
+        // Синхронізуємо системну апаратну гучність безпосередньо із заданим рівнем
+        Self.setMacSystemVolume(clampedTarget)
         
         let playerItem = AVPlayerItem(url: url)
         let newPlayer = AVPlayer(playerItem: playerItem)
         
-        // Start muted for instant Safe Volume Protection
-        newPlayer.volume = 0
-        self.volume = 0
-        self.player = newPlayer
+        if fadeInDuration > 0.05 {
+            newPlayer.volume = 0.0
+            self.player = newPlayer
+            startFadeIn(duration: fadeInDuration)
+        } else {
+            newPlayer.volume = 1.0
+            self.player = newPlayer
+        }
         
         // Periodic time observer
         timeObserver = newPlayer.addPeriodicTimeObserver(
@@ -67,38 +189,28 @@ final class MacAudioPlayer {
         
         newPlayer.play()
         self.isPlaying = true
-        
-        // Execute smooth local fade-in
-        if fadeInDuration > 0 {
-            startFadeIn(to: clampedTarget, duration: fadeInDuration)
-        } else {
-            setVolume(clampedTarget)
-        }
     }
     
-    /// Smooth hardware/software level fade-in on Mac
-    private func startFadeIn(to target: Float, duration: Double) {
+    private func startFadeIn(duration: Double) {
         fadeTask?.cancel()
-        
-        let steps = max(10, Int(duration * 25)) // 25 steps per second
-        let intervalNs = UInt64((duration / Double(steps)) * 1_000_000_000)
-        let stepDelta = target / Float(steps)
+        let steps = max(10, Int(duration * 30))
+        let interval = UInt64((duration / Double(steps)) * 1_000_000_000)
         
         fadeTask = Task { @MainActor in
             for step in 1...steps {
                 guard !Task.isCancelled else { break }
-                let current = min(target, stepDelta * Float(step))
-                self.setVolume(current)
-                try? await Task.sleep(nanoseconds: intervalNs)
+                let progress = Float(step) / Float(steps)
+                self.player?.volume = progress
+                try? await Task.sleep(nanoseconds: interval)
             }
-            self.setVolume(target)
+            self.player?.volume = 1.0
         }
     }
     
-    func setVolume(_ newVolume: Float) {
-        let clamped = max(0, min(1, newVolume))
-        self.volume = clamped
-        player?.volume = clamped
+    func cancelFadeIn() {
+        fadeTask?.cancel()
+        fadeTask = nil
+        player?.volume = 1.0
     }
     
     func pause() {
@@ -126,9 +238,6 @@ final class MacAudioPlayer {
     }
     
     func stop() {
-        fadeTask?.cancel()
-        fadeTask = nil
-        
         player?.pause()
         if let timeObserver {
             player?.removeTimeObserver(timeObserver)

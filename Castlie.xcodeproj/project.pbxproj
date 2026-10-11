@@ -39,7 +39,6 @@
 		93133FC46289BC28CE9FCF53 /* HandoffConfirmSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7DAD391DD04B46C565F2359 /* HandoffConfirmSheet.swift */; };
 		A14CB7A2019BF7D0FB2397FB /* SafeVolumeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CA9ECD8DF6A068ACF23883C /* SafeVolumeConfig.swift */; };
 		A67E2830D0776CDB2327C643 /* SafetyIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABED7A2D16542F96DB42FAF7 /* SafetyIndicator.swift */; };
-		AB64482AB3B5610DFE8A2B70 /* VolumeLimitSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D26715616DFA9DACB7D18FD /* VolumeLimitSettings.swift */; };
 		AB93906B1EF097968A584E88 /* PlaylistManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90BC9420A2E4A819BDF243F /* PlaylistManager.swift */; };
 		AD1C3D9464F5A214035430BC /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4A5FA8633EF5BE85535A176 /* SettingsView.swift */; };
 		AE71B4AB92B95D659AA907D6 /* CastlieApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B78F411D1A3A8445F0044C3 /* CastlieApp.swift */; };
@@ -56,7 +55,6 @@
 		D3789D6CEE5C467981D351BF /* NightModeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA5E3AD7BB414A04E7A7970C /* NightModeManager.swift */; };
 		E1935945A56B331C1A0C18A7 /* SpotifyAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C87E2D6EC051266D2693CEE /* SpotifyAuthService.swift */; };
 		E82FA00DA71476765A2D3313 /* ProgressBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4F3584785C2AB987FB9E35A /* ProgressBarView.swift */; };
-		EA59C58AB52D6D20699CF831 /* DeviceCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6634254D2EEAA5823F77DE84 /* DeviceCardView.swift */; };
 		ED7FAB7FEE30987146DC7F61 /* PlaybackControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 551E4A5FF1F50B1EEEC30C67 /* PlaybackControlsView.swift */; };
 		EF94570A7840ACED4A678122 /* AlbumArtView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEC5899CEA02E061666E48FA /* AlbumArtView.swift */; };
 		F3628FEF893C41B40A464B77 /* DeviceHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AC5B1F6CE2426302F030B0 /* DeviceHistory.swift */; };
@@ -71,7 +69,6 @@
 		1C87E2D6EC051266D2693CEE /* SpotifyAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyAuthService.swift; sourceTree = "<group>"; };
 		261E6044E5301A1C9408E98D /* MiniPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayerView.swift; sourceTree = "<group>"; };
 		295BF9AF1D345A81F650CC0F /* DeviceManagerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceManagerViewModel.swift; sourceTree = "<group>"; };
-		3D26715616DFA9DACB7D18FD /* VolumeLimitSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeLimitSettings.swift; sourceTree = "<group>"; };
 		4DBA58992A8F4575320013E8 /* AirPlayPickerButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirPlayPickerButton.swift; sourceTree = "<group>"; };
 		4E28BB82DB6D1D0F901F2E86 /* Color+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
 		50A9060CC1DDF38EC3B246B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -80,7 +77,6 @@
 		5991AD9CB2DC728E7F251FA2 /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
 		6367BE680BC1A6CFDF3EFDD2 /* TrackCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackCardView.swift; sourceTree = "<group>"; };
 		647015BCBDCBCF1DE9E5398B /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
-		6634254D2EEAA5823F77DE84 /* DeviceCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCardView.swift; sourceTree = "<group>"; };
 		6D287E41A635A759C0CFAF86 /* NewReleasesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewReleasesSection.swift; sourceTree = "<group>"; };
 		6DC4FCE1B6F1C422E24D976F /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		763CD30128854004A52A59E3 /* AudioDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDevice.swift; sourceTree = "<group>"; };
@@ -116,7 +112,7 @@
 		F812F034883E6EA18D3F8111 /* VolumeSliderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeSliderView.swift; sourceTree = "<group>"; };
 		F90BC9420A2E4A819BDF243F /* PlaylistManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistManager.swift; sourceTree = "<group>"; };
 		F9E9D78936D3252D274F9EA9 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
-		FA134243D22AAE489A9F93AF /* Castlie.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Castlie.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FA134243D22AAE489A9F93AF /* Castlie.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Castlie.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FA451F7F5DD315BDFCA1780E /* Color+DominantColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+DominantColor.swift"; sourceTree = "<group>"; };
 		FCCDABC4F9883EEC26F642C9 /* AppFonts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFonts.swift; sourceTree = "<group>"; };
 		FEC5899CEA02E061666E48FA /* AlbumArtView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumArtView.swift; sourceTree = "<group>"; };
@@ -126,7 +122,6 @@
 		1B950657CC3E9958B55C9E62 /* Devices */ = {
 			isa = PBXGroup;
 			children = (
-				6634254D2EEAA5823F77DE84 /* DeviceCardView.swift */,
 				08A40CD231A7FDBD94593675 /* DevicesView.swift */,
 				E7DAD391DD04B46C565F2359 /* HandoffConfirmSheet.swift */,
 			);
@@ -269,7 +264,6 @@
 				A79D3EEF133A73BDB018982B /* FadeInSettings.swift */,
 				C9BFEC59210BC5D82CADDAEC /* NightModeSettings.swift */,
 				C4A5FA8633EF5BE85535A176 /* SettingsView.swift */,
-				3D26715616DFA9DACB7D18FD /* VolumeLimitSettings.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -336,6 +330,7 @@
 				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					105A2592D39FB0859B555CB9 = {
+						DevelopmentTeam = RCB9V8KY57;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -388,7 +383,6 @@
 				57D236DEE952210BD357CE74 /* Color+DominantColor.swift in Sources */,
 				1C3B6C16C825835C516BA278 /* Color+Hex.swift in Sources */,
 				24438BAEAD72DE536EF8086F /* ContentView.swift in Sources */,
-				EA59C58AB52D6D20699CF831 /* DeviceCardView.swift in Sources */,
 				11B294B3A97BCBDB41CD0182 /* DeviceDiscoveryService.swift in Sources */,
 				F3628FEF893C41B40A464B77 /* DeviceHistory.swift in Sources */,
 				91739EF62852662B62337D24 /* DeviceManagerViewModel.swift in Sources */,
@@ -426,7 +420,6 @@
 				B6D48AB60C4CD6B547F5F898 /* Track.swift in Sources */,
 				4591D7D159AFF6BBFE63FD6F /* TrackCardView.swift in Sources */,
 				33A49279A676232E07241859 /* View+Transitions.swift in Sources */,
-				AB64482AB3B5610DFE8A2B70 /* VolumeLimitSettings.swift in Sources */,
 				5D73FB024D2F7961270918CA /* VolumeSliderView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -468,10 +461,12 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = RCB9V8KY57;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -563,10 +558,12 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = RCB9V8KY57;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;

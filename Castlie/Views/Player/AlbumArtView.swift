@@ -45,28 +45,31 @@ struct AlbumArtView: View {
     }
 
     var body: some View {
-        Group {
-            if let image = cachedImage {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } else {
-                AsyncImage(url: track.albumImageURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
+        Color.clear
+            .frame(width: targetSize, height: targetSize)
+            .overlay {
+                Group {
+                    if let image = cachedImage {
+                        Image(uiImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                    case .failure, .empty:
-                        albumPlaceholder
-                    @unknown default:
-                        albumPlaceholder
+                    } else {
+                        AsyncImage(url: track.albumImageURL) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                            case .failure, .empty:
+                                albumPlaceholder
+                            @unknown default:
+                                albumPlaceholder
+                            }
+                        }
                     }
                 }
             }
-        }
-        .frame(width: targetSize, height: targetSize)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .shadow(
             color: .black.opacity(effectiveShadowOpacity),
             radius: effectiveShadowRadius,

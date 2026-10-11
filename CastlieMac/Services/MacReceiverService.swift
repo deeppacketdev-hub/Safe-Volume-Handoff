@@ -99,12 +99,14 @@ final class MacReceiverService: NSObject {
     // MARK: - Outgoing Messages
     
     private func sendRegistration() {
+        let currentSysVol = MacAudioPlayer.getMacSystemVolume()
+        audioPlayer.setVolume(currentSysVol)
         let payload: [String: Any] = [
             "type": "register",
             "role": "receiver",
             "deviceId": deviceId,
             "name": deviceName,
-            "volume": audioPlayer.volume,
+            "volume": currentSysVol,
             "isPlaying": audioPlayer.isPlaying,
             "currentTrack": currentTrack.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) } as Any
         ]
@@ -179,7 +181,7 @@ final class MacReceiverService: NSObject {
             let previewURLString = trackData["previewURL"] as? String
             
             let targetVol = (json["targetVolume"] as? NSNumber)?.floatValue ?? 0.35
-            let fadeIn = (json["fadeInDuration"] as? NSNumber)?.doubleValue ?? 2.0
+            let fadeInDuration = (json["fadeInDuration"] as? NSNumber)?.doubleValue ?? 0.0
             let sender = json["senderName"] as? String ?? "iPhone"
             
             let track = RemoteTrackInfo(
@@ -209,8 +211,8 @@ final class MacReceiverService: NSObject {
                     return
                 }
                 
-                print("[MacReceiver] ▶️ Playing \(trackName) with volume \(Int(targetVol * 100))% (fade-in: \(fadeIn)s)")
-                self.audioPlayer.play(url: finalURL, targetVolume: targetVol, fadeInDuration: fadeIn)
+                print("[MacReceiver] ▶️ Playing \(trackName) with system volume \(Int(targetVol * 100))%")
+                self.audioPlayer.play(url: finalURL, targetVolume: targetVol, fadeInDuration: fadeInDuration)
                 
                 // Broadcast updated playback state
                 self.send(json: [

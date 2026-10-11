@@ -1,480 +1,340 @@
-# Castlie — Проєктний План iOS Додатку
+# Castlie — Проєктний План iOS Екосистеми
 
 ## Огляд Проєкту
 
-**Castlie** — повноцінний музичний плеєр для iOS, головною фішкою якого є **Safe Volume Handoff** — безпечне перемикання аудіо на зовнішні пристрої з попереднім контролем гучності. Музика підтягується через **Spotify Web API** (30-секундні прев'ю треків з якісними обкладинками).
+**Castlie** — це передовий музичний плеєр та аудіо-екосистема для iOS та macOS, серцем якої є технологія **Safe Volume Handoff** — інтелектуальне та безпечне перемикання аудіопотоку на зовнішні пристрої (Bluetooth-колонки, навушники, телевізори, AirPlay-ресивери та комп'ютери Mac) з обов'язковим попереднім контролем та обмеженням гучності. Музичний каталог підтягується через офіційний **Spotify Web API** (30-секундні прев'ю треків, метадані та високоякісні обкладинки альбомів).
 
-Додаток вирішує реальні проблеми, виявлені в [дослідженні Spotify Connect](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Лаба%201%20ЛМВ.pdf):
+Проєкт розроблено на основі емпіричного UX-дослідження взаємодії зі Spotify Connect та аудіосистемами:
 
-| Проблема з дослідження | Наше рішення |
+| Проблема з дослідження | Реальне рішення в Castlie |
 |---|---|
-| Непередбачуваний рівень гучності при підключенні (П2, П9) | Попередній перегляд гучності + діалог підтвердження |
-| Страх раптового гучного звуку ввечері | Night Mode з автоматичним обмеженням гучності |
-| Колонка грає на своєму попередньому рівні | Fade-in + максимальний поріг |
-| Хибний workaround: скручування гучності телефону | Історія пристроїв із запам'ятовуванням рівня |
+| Непередбачуваний рівень гучності при підключенні (П2, П9) | **Попередній перегляд і регулювання гучності ДО підключення** + діалог підтвердження `HandoffConfirmSheet` |
+| Страх раптового оглушливого звуку (П2) | **Попередній контроль гучності** та обов'язковий підкапотний Fade-in |
+| Зовнішня колонка оглушливо грає на своєму старому рівні | **Підкапотний софтверний Fade-in** (плавне наростання звуку 0.0 → 1.0) без зсуву системного повзунка |
+| Хибний workaround: скручування звуку на телефоні перед підключенням | **Історія пристроїв** із запам'ятовуванням бажаного рівня для кожного гаджета окремо |
+| Радикальні дії при збої (вимикання/вмикання Bluetooth) | Прозоре керування маршрутами, відновлення останнього пристрою та витончене керування виводом |
+| Відсутність синхронного керування звуком між iPhone та Mac | Власна мережева шина **Castlie Connect** через WebSocket-релей (`castlie.dron.lol`) |
 
 ---
 
 ## Технічний Стек
 
-| Компонент | Технологія |
-|---|---|
-| Платформа | iOS 26+ |
-| Мова | Swift 6 |
-| UI Framework | SwiftUI |
-| Архітектура | MVVM + `@Observable` macro |
-| Аудіо | AVFoundation (AVPlayer для Spotify прев'ю) |
-| Пристрої | AVRoutePickerView (AirPlay) + CoreBluetooth |
-| Музика | Spotify Web API (30с прев'ю треків) |
-| Зберігання | SwiftData / UserDefaults |
-| Іконки | SF Symbols (без емоджі) |
-| Мова інтерфейсу | Українська |
+| Компонент | Технологія / Інструмент | Деталі реалізації |
+|---|---|---|
+| **Платформа** | iOS 18.0+ / 26.0+ (iOS SDK 27), macOS 15.0+ | Підтримка iPhone, iPad та нативного Mac MenuBar додатку |
+| **Мова програмування** | Swift 6.0 | Сувора безпека конкурентності (Strict Concurrency Checking, `Sendable`, `@MainActor`) |
+| **UI Framework** | SwiftUI | Сучасна архітектура, Apple Liquid Glass (`.glassEffect`), Apple Fluid Springs |
+| **Архітектура** | MVVM + Direct Service Reactivity | Використання макросу `@Observable`, скорочення зайвих проміжних обгорток |
+| **Аудіо-движок** | AVFoundation (`AVPlayer`, `AVAudioSession`) | Фонове відтворення (`.playback`, `.longFormAudio`), `MPNowPlayingInfoCenter`, переривання |
+| **Керування гучністю** | `SystemVolumeController` + `FadeInEngine` | On-demand `MPVolumeView` для збереження системної шторки iOS + софтверний гейн для fade-in |
+| **Виявлення пристроїв** | `AVAudioSession` + `AVRouteDetector` | Відстеження реальних апаратних маршрутів та доступності AirPlay без мок-заглушок |
+| **Мережевий релей** | WebSocket (WSS) + Node.js | Релей-сервер на базі Docker (`wss://castlie.dron.lol/ws?roomId=default`) з heartbeat-пінгами |
+| **Mac-клієнт** | macOS `MenuBarExtra` | Нативний фоновий супутник у статус-барі macOS (`CastlieMac`) |
+| **Музичний каталог** | Spotify Web API | Client Credentials Flow з автооновленням токена, кешування обкладинок |
+| **Зберігання даних** | `UserDefaults` / JSON Encoding | Персистентність налаштувань безпеки, історії пристроїв та плейлистів користувача |
+| **Іконки та стиль** | SF Symbols (100%) | Жодних емоджі в коді та UI, строго відповідні системні символи Apple |
+| **Мова інтерфейсу** | Українська | Повна локалізація інтерфейсу користувача |
 
 ---
 
-## Тестування на iPhone
+## Архітектура Екосистеми
 
-> [!TIP]
-> **Безкоштовне тестування на фізичному iPhone** — повністю можливо!
-> 
-> 1. Створіть безкоштовний Apple ID
-> 2. Додайте його в Xcode → Settings → Accounts
-> 3. В проєкті виберіть Team → ваш Personal Team
-> 4. Підключіть iPhone кабелем, натисніть Run
-> 5. На iPhone: Settings → General → VPN & Device Management → Trust
-> 
-> **Обмеження**: додаток потрібно перевстановлювати кожні 7 днів, максимум 3 активні додатки.
-
----
-
-## Архітектура Додатку
+Castlie — це розподілена система, що об'єднує клієнтський додаток iPhone, нативний фоновий плеєр Mac та хмарний релей:
 
 ```mermaid
 graph TB
-    subgraph "UI Layer (SwiftUI)"
-        A[TabView] --> B["Головна (Spotify)"]
-        A --> C[Пошук]
-        A --> D[Пристрої]
-        A --> E[Налаштування]
-        F[Міні-плеєр] --> G[Повноекранний плеєр]
+    subgraph "iOS App (Castlie)"
+        A[ContentView & TabView] --> B[HomeView]
+        A --> C[SearchView]
+        A --> D[DevicesView - Castlie Connect]
+        A --> E[SettingsView]
+        
+        F[MiniPlayerView] <-->|Apple Fluid Springs Morphing| G[FullPlayerView]
+        
+        subgraph "Reactive Services (@Observable)"
+            H[AudioEngine - AVPlayer]
+            I[SafeVolumeManager]
+            J[FadeInEngine]
+            K[SystemVolumeController]
+            L[DeviceDiscoveryService]
+            M[CastlieConnectService]
+            N[PlaylistManager]
+            O[SpotifyAPIService]
+            P[SpotifyAuthService]
+        end
     end
     
-    subgraph "ViewModel Layer (@Observable)"
-        H[AudioPlayerVM]
-        I[DeviceManagerVM]
-        J[HomeVM]
-        K[SearchVM]
-        L[SettingsVM]
+    subgraph "Relay Server (Docker / Cloudflare)"
+        Q["server.js (Node.js WebSocket WSS) - castlie.dron.lol"]
     end
     
-    subgraph "Service Layer"
-        M[AudioEngine]
-        N[DeviceDiscovery]
-        O[SafeVolumeManager]
-        P[SpotifyAPIService]
-        Q[SpotifyAuthService]
-        R[ThemeManager]
+    subgraph "macOS Companion (CastlieMac)"
+        R[MenuBarView]
+        S[MacReceiverService]
+        T[MacAudioPlayer]
     end
     
-    subgraph "Data Layer"
-        S[SwiftData / UserDefaults]
-        T[Device History]
-        U[Playlists]
+    subgraph "Audio Outputs & Cloud"
+        U[Spotify Web API]
+        V[iPhone Speakers]
+        W[Bluetooth Speakers / Headphones]
+        X[AirPlay Devices / Apple TV]
     end
 
-    B --> J --> P
-    C --> K --> P
-    D --> I --> N
-    E --> L
-    G --> H --> M
-    H --> O
-    I --> O
-    O --> T
-    L --> S
-    P --> Q
+    B & C --> O --> P --> U
+    D --> L
+    D --> I
+    G & F --> H
+    H --> K
+    H --> J
+    H --> V & W & X
+    
+    M <-->|WSS WebSocket / Heartbeat| Q
+    Q <-->|WSS WebSocket / Remote Audio| S
+    S --> T
+    R --> S
 ```
 
 ---
 
 ## Структура Проєкту
 
+Реальна структура репозиторію з усіма модулями, сервісами та супутніми таргетами:
+
 ```
-Castlie/
-├── CastlieApp.swift                     # Точка входу
-├── ContentView.swift                    # TabView + міні-плеєр
+Safe-Volume-Handoff/
+├── project.yml                          # Конфігурація генерації Xcode-проєкту (XcodeGen)
+├── Castlie.xcodeproj                    # Згенерований проєкт Xcode
+├── Dockerfile                           # Docker-контейнер релей-сервера
 │
-├── Theme/
-│   ├── ThemeManager.swift               # Система тем (не захардкоджена)
-│   ├── AppColors.swift                  # Палітра кольорів
-│   └── AppFonts.swift                   # Типографіка
-│
-├── Models/
-│   ├── Track.swift                      # Уніфікована модель треку
-│   ├── Playlist.swift                   # Модель плейлиста
-│   ├── AudioDevice.swift                # Модель аудіопристрою
-│   ├── DeviceHistory.swift              # Історія підключень з гучністю
-│   ├── SafeVolumeConfig.swift           # Конфігурація safe mode
-│   └── SpotifyModels.swift              # Моделі для Spotify API відповідей
-│
-├── ViewModels/
-│   ├── AudioPlayerViewModel.swift       # Керування відтворенням
-│   ├── DeviceManagerViewModel.swift     # Виявлення та підключення пристроїв
-│   ├── HomeViewModel.swift              # Головна: нові релізи, рекомендації
-│   ├── SearchViewModel.swift            # Пошук по Spotify
-│   └── SettingsViewModel.swift          # Налаштування
-│
-├── Services/
-│   ├── AudioEngine.swift                # AVPlayer для Spotify прев'ю
-│   ├── DeviceDiscoveryService.swift     # AirPlay + Bluetooth discovery
-│   ├── SafeVolumeManager.swift          # КЛЮЧОВИЙ: логіка safe handoff
-│   ├── FadeInEngine.swift               # Плавне наростання гучності
-│   ├── NightModeManager.swift           # Часовий профіль
-│   ├── SpotifyAPIService.swift          # HTTP-клієнт для Spotify Web API
-│   ├── SpotifyAuthService.swift         # OAuth 2.0 Client Credentials flow
-│   └── HapticFeedbackService.swift      # Вібрація при подіях
-│
-├── Views/
-│   ├── Home/
-│   │   ├── HomeView.swift               # Головна: нові релізи, категорії
-│   │   ├── TrackCardView.swift          # Картка треку з обкладинкою
-│   │   ├── NewReleasesSection.swift     # Секція нових релізів
-│   │   └── PlaylistView.swift           # Вигляд плейлиста
+├── Castlie/                             # Головний таргет iOS-додатку
+│   ├── CastlieApp.swift                 # Точка входу, налаштування системного URLCache
+│   ├── ContentView.swift                # Корінь UI: TabView + інтерактивний морфінг-плеєр
+│   ├── Info.plist                       # Дозволи Bluetooth, аудіо-фоновий режим
 │   │
-│   ├── Search/
-│   │   ├── SearchView.swift             # Пошук по Spotify
-│   │   ├── SearchResultsView.swift      # Результати пошуку
-│   │   └── SpotifyTrackRow.swift        # Рядок треку з обкладинкою
+│   ├── Theme/
+│   │   ├── ThemeManager.swift           # @Observable менеджер палітри кольорів
+│   │   └── AppFonts.swift               # Системні шрифти з округлим дизайном (.rounded)
 │   │
-│   ├── Player/
-│   │   ├── MiniPlayerView.swift         # Міні-плеєр внизу
-│   │   ├── FullPlayerView.swift         # Повноекранний плеєр
-│   │   ├── AlbumArtView.swift           # Обкладинка з адаптивним фоном
-│   │   ├── PlaybackControlsView.swift   # Кнопки play/pause/skip
-│   │   ├── ProgressBarView.swift        # Прогрес-бар
-│   │   └── VolumeSliderView.swift       # Повзунок гучності
+│   ├── Models/
+│   │   ├── Track.swift                  # Уніфікована модель треку
+│   │   ├── AudioDevice.swift            # Модель пристрою (iPhone, Mac, Speaker, TV тощо)
+│   │   ├── DeviceHistory.swift          # Запис історії підключення з рівнем гучності
+│   │   ├── Playlist.swift               # Модель користувацького плейлиста
+│   │   ├── SafeVolumeConfig.swift       # Конфігурація порогів безпеки та fade-in
+│   │   └── SpotifyModels.swift          # DTO моделі відповідей Spotify API
 │   │
-│   ├── Devices/
-│   │   ├── DevicesView.swift            # Таб пристроїв
-│   │   ├── DeviceCardView.swift         # Картка пристрою
-│   │   ├── DeviceVolumePreview.swift    # Попередній перегляд гучності
-│   │   ├── HandoffConfirmSheet.swift    # Діалог підтвердження
-│   │   └── HandoffAnimationView.swift   # Анімація передачі
+│   ├── ViewModels/
+│   │   ├── DeviceManagerViewModel.swift # Координатор стану пристроїв та handoff-підключення
+│   │   ├── HomeViewModel.swift          # Завантаження релізів та персональних рекомендацій
+│   │   ├── SearchViewModel.swift        # Пошук по каталогу з 0.5с debounce
+│   │   └── SettingsViewModel.swift      # Менеджмент збереження налаштувань
 │   │
-│   └── Settings/
-│       ├── SettingsView.swift           # Таб налаштувань
-│       ├── NightModeSettings.swift      # Налаштування нічного режиму
-│       ├── FadeInSettings.swift         # Тривалість fade-in
-│       ├── VolumeLimitSettings.swift    # Макс. поріг гучності
-│       └── ThemeSettings.swift          # Налаштування теми
+│   ├── Services/
+│   │   ├── AudioEngine.swift            # Ядро AVPlayer: відтворення, черга, NowPlaying, переривання
+│   │   ├── CastlieConnectService.swift  # Клієнт зв'язку з Mac через WebSocket релей-сервер
+│   │   ├── DeviceDiscoveryService.swift # Відстеження апаратних аудіо-маршрутів та AirPlay
+│   │   ├── SafeVolumeManager.swift      # Логіка рівнів безпеки, розрахунок рекомендованої гучності
+│   │   ├── FadeInEngine.swift           # Софтверний fade-in (software gain 0.0 -> 1.0)
+│   │   ├── SystemVolumeController.swift # On-demand активація MPVolumeView для збереження HUD
+│   │   ├── PlaylistManager.swift        # Локальне збереження улюблених треків та плейлистів
+│   │   ├── SpotifyAPIService.swift      # HTTP-запити до каталогів та альбомів Spotify
+│   │   ├── SpotifyAuthService.swift     # Авторизація Client Credentials Flow з авторефрешем
+│   │   └── HapticFeedbackService.swift  # Тактильний відгук (UIImpactFeedbackGenerator)
+│   │
+│   ├── Views/
+│   │   ├── Home/
+│   │   │   ├── HomeView.swift           # Головний екран: каруселі, мікси, плейлисти
+│   │   │   ├── NewReleasesSection.swift # Горизонтальний скрол нових альбомів
+│   │   │   ├── TrackCardView.swift      # Картка треку/альбому для каруселей
+│   │   │   └── AlbumDetailView.swift    # Детальний перегляд трек-листа вибраного альбому
+│   │   │
+│   │   ├── Search/
+│   │   │   ├── SearchView.swift         # Пошуковий інтерфейс з результатами
+│   │   │   └── SpotifyTrackRow.swift    # Рядок треку з обкладинкою та індикатором відтворення
+│   │   │
+│   │   ├── Player/
+│   │   │   ├── FullPlayerView.swift     # Повноекранний плеєр з адаптивним градієнтом
+│   │   │   ├── MiniPlayerView.swift     # Інтерактивна капсула міні-плеєра (Liquid Glass)
+│   │   │   ├── AlbumArtView.swift       # Велика обкладинка з екстракцією палітри
+│   │   │   ├── PlaybackControlsView.swift # Контроли play/pause/skip з хаптиком
+│   │   │   ├── ProgressBarView.swift    # Інтерактивний скруббер таймлайну
+│   │   │   └── VolumeSliderView.swift   # Слайдер гучності з колірною індикацією безпеки
+│   │   │
+│   │   ├── Devices/
+│   │   │   ├── DevicesView.swift        # Екран Castlie Connect: вибір та контроль виводу
+│   │   │   └── HandoffConfirmSheet.swift# Діалог підтвердження безпечного підключення
+│   │   │
+│   │   ├── Playlists/
+│   │   │   └── PlaylistView.swift       # Екран перегляду та керування плейлистом
+│   │   │
+│   │   └── Settings/
+│   │       ├── SettingsView.swift       # Меню налаштувань у стилі iOS Settings
+│   │       ├── FadeInSettings.swift     # Тривалість плавного наростання
+│   │       └── AboutView.swift          # Довідка про проєкт та академічне дослідження
+│   │
+│   ├── Components/
+│   │   ├── AirPlayPickerButton.swift    # UIViewRepresentable міст до AVRoutePickerView
+│   │   ├── AnimatedWaveform.swift       # Синусоїдальний живий еквалайзер на TimelineView
+│   │   ├── GlowingButton.swift          # Кнопка з пульсуючим неоновим ореолом
+│   │   └── SafetyIndicator.swift        # Бейдж статусу гучності (безпечно / увага / небезпечно)
+│   │
+│   └── Extensions/
+│       ├── Color+DominantColor.swift    # Екстракція домінантного кольору з NSCache
+│       ├── Color+Hex.swift              # Ініціалізатор Color з hex-рядка
+│       └── View+Transitions.swift       # Утилітарні модифікатори карток та анімацій
 │
-├── Components/
-│   ├── AdaptiveBackground.swift         # Фон на основі обкладинки
-│   ├── GlowingButton.swift              # Кнопка з ефектом свічення
-│   ├── AnimatedWaveform.swift           # Анімована хвиля
-│   └── SafetyIndicator.swift            # Індикатор безпеки (зелений/жовтий/червоний)
+├── CastlieMac/                          # Таргет супутнього Mac MenuBar додатку
+│   ├── CastlieMacApp.swift              # Точка входу macOS додатку з MenuBarExtra
+│   ├── Package.swift                    # Swift Package конфігурація
+│   ├── Services/
+│   │   ├── MacReceiverService.swift     # WSS клієнт обробки команд від iPhone
+│   │   └── MacAudioPlayer.swift         # Локальне відтворення AVPlayer на Mac
+│   └── Views/
+│       └── MenuBarView.swift            # Компактне випадаюче вікно керування в Mac статус-барі
 │
-└── Extensions/
-    ├── Color+DominantColor.swift        # Витягування домінантного кольору
-    ├── View+Transitions.swift           # Кастомні переходи
-    └── AVAudioSession+SafeVolume.swift  # Розширення аудіосесії
+└── server/                              # Node.js WebSocket релей-сервер
+    ├── server.js                        # Маршрутизація кімнат, обробка WSS повідомлень, healthcheck
+    └── package.json                     # Залежності ws, http
 ```
-
-> [!IMPORTANT]
-> В додатку використовуються виключно **SF Symbols** для іконок — жодних емоджі!
 
 ---
 
-## Ключові Екрани
+## Ключові Архітектурні та Інженерні Рішення
 
-### 1. Головна (Home Tab)
-**SF Symbol**: `music.note.house.fill`
-- Нові релізи з Spotify
-- Рекомендації за жанрами
-- Плейлисти (створені користувачем у додатку)
-- Горизонтальні секції з обкладинками альбомів
+### 1. Пряма реактивність замість зайвих прошарків
+У первинному плані передбачався окремий `AudioPlayerViewModel`. На практиці сервіс [AudioEngine.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Services/AudioEngine.swift) побудований як `@Observable @MainActor` синглтон. Завдяки сучасному макросу `@Observable`, SwiftUI-в'ю напряму спостерігають лише за тими властивостями аудіо-движка, які фактично рендерять. Це усунуло дублювання стану та забезпечило найвищу швидкість відгуку.
 
-### 2. Пошук (Search Tab)
-**SF Symbol**: `magnifyingglass`
-- Пошук треків через **Spotify Web API**
-- Гарні обкладинки альбомів від Spotify
-- 30-секундні прев'ю треків
-- Фільтр за жанром / виконавцем
+### 2. Підкапотний софтверний Fade-in
+Замість програмного переміщення системного повзунка iOS (що спантеличувало б користувача стрибками гучності в інтерфейсі), [FadeInEngine.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Services/FadeInEngine.swift) керує внутрішнім параметром `softwareGain` (від 0.0 до 1.0 з частотою 30 кроків/сек). 
+- Повзунок користувача залишається на бажаному рівні (наприклад, 40%).
+- Фактичний звук плавно піднімається від абсолютної тиші до встановленого рівня.
 
-### 3. Плеєр (Now Playing)
-**SF Symbol**: `play.circle.fill`
-- **Міні-плеєр** — завжди видимий внизу, показує поточний трек
-- **Повноекранний плеєр** — відкривається плавною анімацією з міні-плеєра:
-  - Обкладинка альбому з **адаптивним фоном** (домінантний колір)
-  - Прогрес-бар із можливістю перемотки (30 секунд)
-  - Play/Pause, Skip, Previous
-  - Повзунок гучності з індикатором безпеки
-  - Іконка поточного пристрою (`hifispeaker.fill` — натискання → перехід до пристроїв)
+### 3. Збереження системної шторки iOS (On-Demand Activation)
+При стандартній інтеграції `MPVolumeView` операційна система iOS блокує показ рідного системного оверлею гучності (HUD) при натисканні апаратних бічних клавіш iPhone.
+У сервісі [SystemVolumeController.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Services/SystemVolumeController.swift) застосовано підхід **On-Demand Activation**:
+- Прихований `MPVolumeView` приєднується до ієрархії вікна **виключно в момент, коли користувач торкається повзунка у додатку**.
+- Через 0.35 секунди після завершення жесту елемент видаляється з вікна.
+- Фізичні клавіші iPhone працюють штатно, виводячи красиву системну шторку iOS.
 
-### 4. Пристрої (Devices Tab) — **ГОЛОВНИЙ ЕКРАН ПРОЄКТУ**
-**SF Symbol**: `hifispeaker.2.fill`
+### 4. Відмова від штучних мок-пристроїв
+Сервіс [DeviceDiscoveryService.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Services/DeviceDiscoveryService.swift) працює безпосередньо з системними аудіо-портами iOS:
+- Поточний маршрут зчитується з `AVAudioSession.sharedInstance().currentRoute`.
+- Зміни відстежуються через системне сповіщення `.routeChangeNotification`.
+- Доступність AirPlay у локальній мережі визначається через `AVRouteDetector`.
+- Останній активний Bluetooth-гаджет зберігається в пам'яті, щоб користувач міг повернути звук на колонку навіть після тимчасового перемикання на динамік iPhone.
 
-Це серце додатку — тут реалізовані всі UX-рішення з дослідження:
+### 5. Мережева шина Castlie Connect та усунення розривів
+Для взаємодії з комп'ютером Mac розроблено протокол Castlie Connect:
+- iPhone та Mac підключаються до захищеного релей-сервера [server/server.js](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/server/server.js) через WebSocket (`wss://castlie.dron.lol`).
+- Для запобігання обриву з'єднання зворотним проксі Cloudflare реалізовано 15-секундний `ping-heartbeat` таймер.
+- iPhone передає URL треку, позицію, статус відтворення та команди безпечної гучності, а Mac повертає свій апаратний рівень звуку.
 
-```
-┌─────────────────────────────────┐
-│  [hifispeaker.2] Пристрої       │
-│                                  │
-│  [iphone] Цей iPhone    ● 100%  │
-│  ─────────────────────────────  │
-│                                  │
-│  Доступні пристрої:              │
-│                                  │
-│  ┌─────────────────────────────┐│
-│  │ [hifispeaker] JBL Flip 6    ││
-│  │ Bluetooth · Кімната          ││
-│  │ Остання гучність: 35%        ││
-│  │ ●───────○──────────── 35%    ││
-│  │                              ││
-│  │ [● Підключити безпечно]      ││
-│  │   (зелений колір)            ││
-│  └─────────────────────────────┘│
-│                                  │
-│  ┌─────────────────────────────┐│
-│  │ [tv] Samsung TV              ││
-│  │ AirPlay · Вітальня           ││
-│  │ Остання гучність: 72%        ││
-│  │ ●──────────────○──── 72%     ││
-│  │ [exclamationmark.triangle]   ││
-│  │ УВАГА: Висока гучність       ││
-│  │ [● Підключити з обережністю] ││
-│  │   (жовтий колір)             ││
-│  └─────────────────────────────┘│
-│                                  │
-│  [moon.fill] Нічний режим: УВІМК│
-│  [chart.bar] Макс. поріг: 40%   │
-└─────────────────────────────────┘
-```
+### 6. Apple Fluid Springs & 120 FPS Morphing Player
+Перехід між міні-плеєром та повноекранним плеєром у [FullPlayerView.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Views/Player/FullPlayerView.swift) реалізовано не як модальне вікно, а як **інтерактивний морфінг єдиного View**:
+- Координати, висота, ширина, радіус заокруглення кутів та прозорість розраховуються за формулою лінійної інтерполяції (`lerp`) на основі прогресу свайпу `p` (0.0 — повний екран, 1.0 — міні-капсула).
+- Використовуються калібровані пружини Apple Fluid Springs (`response: 0.50`, `dampingFraction: 0.88`).
+- Враховано відступ Dynamic Island через апаратні `safeAreaInsets`.
+- Капсула міні-плеєра використовує системний стиль Apple Liquid Glass (`.glassEffect(.regular, in: .capsule)`).
 
-#### Діалог підтвердження (HandoffConfirmSheet):
-```
-┌─────────────────────────────────┐
-│        Підключити до            │
-│    [hifispeaker] JBL Flip 6?    │
-│                                  │
-│  Поточна гучність пристрою:     │
-│  ●────────○────────────── 35%   │
-│                                  │
-│  [checkmark.shield] Безпечний   │
-│                                  │
-│  [timer] Fade-in: 2 секунди     │
-│  [moon.fill] Нічний режим: увімк│
-│  [chart.bar] Макс. поріг: 40%   │
-│                                  │
-│  ┌─────────────────────────────┐│
-│  │ [checkmark] Підключити      ││
-│  │           безпечно           ││
-│  └─────────────────────────────┘│
-│                                  │
-│         Скасувати               │
-└─────────────────────────────────┘
-```
-
-### 5. Налаштування (Settings Tab)
-**SF Symbol**: `gearshape.fill`
-- **Нічний режим**: увімк/вимк, час активації (напр. 22:00–08:00)
-- **Fade-in**: тривалість (0.5с – 5с), увімк/вимк
-- **Максимальний поріг**: % при першому підключенні
-- **Тема**: чорний фон + червоно-оранжевий акцент (з можливістю зміни)
-- **Про додаток**: інформація, посилання на дослідження
+### 7. Оптимізація продуктивності та рендеру
+- **AnimatedWaveform на TimelineView**: стовпчики еквалайзера анімуються за плавною синусоїдою лише під час відтворення, а при натисканні на паузу миттєво завмирають, зводячи навантаження на процесор до 0% CPU.
+- **NSCache для кольорів обкладинок**: розрахунок домінантного відтінку альбому виконується асинхронно зі стисненням до 1x1 пікселя і кешується.
+- **Обмеження пам'яті**: на старті додатку в [CastlieApp.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/CastlieApp.swift) встановлено ліміт `URLCache` (40 MB RAM / 150 MB Disk) для запобігання витокам пам'яті при скролі сотень обкладинок.
 
 ---
 
-## SF Symbols — Довідник іконок для додатку
+## Опис Екранів та Інтерфейсу
 
-| Елемент | SF Symbol |
-|---|---|
-| Таб Головна | `music.note.house.fill` |
-| Таб Пошук | `magnifyingglass` |
-| Таб Пристрої | `hifispeaker.2.fill` |
-| Таб Налаштування | `gearshape.fill` |
-| Play | `play.fill` |
-| Pause | `pause.fill` |
-| Skip Forward | `forward.fill` |
-| Skip Back | `backward.fill` |
-| Гучність (тиха) | `speaker.fill` |
-| Гучність (гучна) | `speaker.wave.3.fill` |
-| Безпечний рівень | `checkmark.shield.fill` |
-| Увага | `exclamationmark.triangle.fill` |
-| Небезпечний рівень | `xmark.shield.fill` |
-| Нічний режим | `moon.fill` |
-| Fade-in | `waveform.path.ecg` |
-| Bluetooth | `wave.3.right` |
-| AirPlay | `airplayaudio` |
-| iPhone | `iphone` |
-| Колонка | `hifispeaker.fill` |
-| TV | `tv.fill` |
-| Пошук | `magnifyingglass` |
-| Плейлист | `list.bullet` |
-| Серце (вподобати) | `heart.fill` |
-| Таймер | `timer` |
-| Поріг гучності | `chart.bar.fill` |
+### 1. Головна (Home)
+- **Карусель нових релізів ([NewReleasesSection.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Views/Home/NewReleasesSection.swift))**: відображення свіжих альбомів зі Spotify з можливістю переходу в повний трек-лист [AlbumDetailView.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Views/Home/AlbumDetailView.swift).
+- **Секція «Рекомендації для вас»**: вертикальний список рекомендованих треків на основі популярних жанрів.
+- **Швидкий доступ до плейлистів**: плашки «Улюблені треки» та користувацькі плейлисти.
 
----
+### 2. Пошук (Search)
+- Миттєвий рядок пошуку з автоматичним 0.5-секундним debounce для захисту від перевищення лімітів Spotify API.
+- Відображення списку треків у компоненті [SpotifyTrackRow.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Views/Search/SpotifyTrackRow.swift) з анімованим індикатором відтворення, якщо цей трек зараз грає.
 
-## 6 Ключових Safe Volume Handoff Функцій
+### 3. Пристрої (Castlie Connect) — Головний екран
+- **Hero Active Output Card**: велика картка поточного джерела відтворення (iPhone / Mac / Bluetooth / AirPlay) з поточною гучністю, назвою та бейджем безпеки.
+- **Слайдер прямого контролю**: плавне регулювання гучності активного пристрою в реальному часі.
+- **Список доступних пристроїв**: відображення виявлених колонок, Mac-комп'ютерів у мережі та AirPlay-приймачів.
+- **Попередній перегляд гучності**: кожна картка показує збережену гучність та дозволяє викликати безпечне підключення.
+- **Діалог [HandoffConfirmSheet.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Views/Devices/HandoffConfirmSheet.swift)**:
+  - Відображає назву цільового пристрою.
+  - Дозволяє відрегулювати стартовий звук ДО фактичного перемикання аудіо.
+  - Попереджає про підвищену або небезпечну гучність (жовта/червона зона).
+  - Містить кнопку `Підключити безпечно` з неоновим свіченням [GlowingButton.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Components/GlowingButton.swift).
+- **AirPlay Picker**: системна кнопка виклику меню аудіовиводу iOS через [AirPlayPickerButton.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Components/AirPlayPickerButton.swift).
 
-### 1. Попередній перегляд гучності
-**SF Symbol**: `speaker.wave.2.fill`
+### 4. Плеєр (Міні-капсула та Повноекранний вигляд)
+- **Міні-плеєр ([MiniPlayerView.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Views/Player/MiniPlayerView.swift))**:
+  - Розміщується над панеллю вкладок.
+  - Обкладинка, назва треку, виконавець або бейдж пристрою, кнопки Play/Pause, Next.
+  - Нижня неонова смуга прогресу з рухомою цяткою `Liquid Playhead Bead`.
+  - Плаваюча підказка Spotify Connect (`SpotifyDeviceCalloutView`) з дзьобиком-стрілкою, яка підказує, де грає музика.
+- **Повноекранний плеєр ([FullPlayerView.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Views/Player/FullPlayerView.swift))**:
+  - Динамічний градієнт фону під колір обкладинки.
+  - Індикатор безпечної гучності та іконка поточного пристрою.
+  - Кнопка додавання до «Улюблених» (`heart.fill`).
+  - Повний скруббер часу, кнопки Shuffle та Repeat.
 
-Показує повзунок гучності цільового пристрою **ДО** підключення в картці пристрою. Дозволяє відрегулювати рівень до початку відтворення.
-
-### 2. Fade-in за замовчуванням
-**SF Symbol**: `waveform.path.ecg`
-
-Плавне наростання звуку при перемиканні — від 0% до обраного рівня за налаштовуваний час (0.5с — 5с).
-
-### 3. Максимальний поріг гучності
-**SF Symbol**: `chart.bar.fill`
-
-Налаштовуваний ліміт максимальної гучності при першому підключенні (напр. 40%). Якщо пристрій запам'ятав 80%, додаток не дозволить стартувати вище порогу.
-
-### 4. Night Mode (Нічний режим)
-**SF Symbol**: `moon.fill`
-
-Автоматично вмикається у вечірній/нічний час. Зменшує максимально допустиму гучність (напр. до 30%), додає обов'язковий fade-in.
-
-### 5. Діалог підтвердження
-**SF Symbol**: `checkmark.shield.fill`
-
-Перед підключенням показується картка пристрою з його ім'ям, кімнатою, рівнем гучності та кнопкою «Підключити безпечно». Колір кнопки залежить від безпеки рівня (зелений / жовтий / червоний).
-
-### 6. Історія пристроїв
-**SF Symbol**: `clock.arrow.circlepath`
-
-Запам'ятовує переважний рівень гучності для кожного пристрою. Наприклад: «JBL Flip 6 → зазвичай 35%», «Samsung TV → зазвичай 25% ввечері».
+### 5. Налаштування (Settings)
+- Оформлений у фірмовому стилі системних параметрів Apple (груповані списки, кольорові іконки-бейджи).
+- **Fade-in**: увімкнення та вибір тривалості від 0.5 до 5.0 секунд.
+- **Підключення та Handoff**: опція «Запитувати підтвердження» та налаштування домену сервера Castlie Connect.
+- **Сервер Castlie Connect**: налаштування адреси релей-сервера.
+- **Про додаток ([AboutView.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Views/Settings/AboutView.swift))**: інформація про розробку та результати лабораторного дослідження.
 
 ---
 
-## Кольорова Схема
+## Моделі Даних та Парсинг
 
-Мінімалістична темна тема з двома акцентними кольорами:
+### 1. Доменні моделі
+- [AudioDevice.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Models/AudioDevice.swift): структура пристрою з переліком `DeviceType` (`.iPhone`, `.mac`, `.speaker`, `.tv`, `.headphones`, `.airplay`, `.bluetooth`) та `ConnectionType`.
+- [Track.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Models/Track.swift): уніфікований трек з назвою, виконавцем, посиланням на обкладинку та `previewURL`.
+- [SafeVolumeConfig.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Models/SafeVolumeConfig.swift): стан конфігурації безпеки та параметри плавного старту (Fade-in).
+- [DeviceHistory.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Models/DeviceHistory.swift): збережені записи `DeviceHistoryEntry` для автоматичного відновлення гучності.
+- [Playlist.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Models/Playlist.swift): модель користувацького списку відтворення.
 
-| Елемент | Колір | Hex |
-|---|---|---|
-| Фон основний | Чорний | `#0A0A0F` |
-| Фон вторинний | Темно-сірий | `#1A1A24` |
-| Фон карток | Графіт | `#242430` |
-| Текст основний | Білий | `#F5F5F7` |
-| Текст вторинний | Сірий | `#8E8E93` |
-| Акцент (основний) | Червоно-оранжевий | `#FF6B35` |
-| Акцент hover | Яскравий оранж | `#FF8C42` |
-| Безпечний рівень | Зелений | `#34C759` |
-| Увага (середній) | Жовтий | `#FFD60A` |
-| Небезпечний рівень | Червоний | `#FF3B30` |
+### 2. DTO парсинг Spotify API ([SpotifyModels.swift](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Castlie/Models/SpotifyModels.swift))
+- Використовує `JSONDecoder.keyDecodingStrategy = .convertFromSnakeCase`.
+- DTO структури: `SpotifyAuthResponse`, `SpotifySearchResponse`, `SpotifyTrack`, `SpotifyAlbum`, `SpotifyArtist`, `SpotifyImage`, `SpotifyNewReleasesResponse`.
+- Функція-мапер `toTrack()` для безшовної конвертації відповіді API у внутрішню модель додатку.
 
-> [!IMPORTANT]
-> Всі кольори визначаються через `ThemeManager` і легко змінюються в одному місці!
+### 3. Протокол WebSocket повідомлень (Castlie Connect)
+Обмін JSON-повідомленнями через релей-сервер:
+```json
+// Реєстрація пристрою
+{ "type": "register", "deviceId": "...", "deviceName": "...", "role": "sender" | "receiver", "volume": 0.4 }
 
----
+// Команда передачі аудіо на Mac
+{ "type": "play_track", "track": { "id": "...", "name": "...", "previewURL": "..." }, "targetDeviceId": "mac_123" }
 
-## Spotify Web API Інтеграція
+// Оновлення гучності
+{ "type": "volume_change", "volume": 0.35, "targetDeviceId": "mac_123" }
 
-[Spotify Web API](https://developer.spotify.com/documentation/web-api) — офіційний API для доступу до каталогу Spotify.
-
-**Переваги**:
-- Якісні обкладинки альбомів (640x640, 300x300, 64x64)
-- Повний каталог Spotify (мільйони треків)
-- Пошук за назвою / виконавцем / альбомом / жанром
-- Метадані треків (тривалість, популярність, дата релізу)
-- Рекомендації та нові релізи
-- Безкоштовна реєстрація на [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
-
-**Обмеження**:
-- 30-секундні прев'ю (preview_url) замість повних треків
-- Не всі треки мають preview_url
-- Rate limit: ~180 запитів/хвилину
-
-**Автентифікація**: Client Credentials Flow (без логіну користувача)
-```
-POST https://accounts.spotify.com/api/token
-  grant_type=client_credentials
-  client_id=YOUR_CLIENT_ID
-  client_secret=YOUR_CLIENT_SECRET
+// Статус та Heartbeat
+{ "type": "ping" } -> { "type": "pong" }
 ```
 
-**Основні API Endpoints**:
-```
-GET https://api.spotify.com/v1/search?q=query&type=track&limit=20
-GET https://api.spotify.com/v1/tracks/{id}
-GET https://api.spotify.com/v1/browse/new-releases
-GET https://api.spotify.com/v1/browse/categories
-GET https://api.spotify.com/v1/recommendations?seed_genres=rock
-```
-
-**Як отримати Client ID (безкоштовно)**:
-1. Зайти на [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
-2. Створити новий App
-3. Скопіювати Client ID та Client Secret
-4. Вставити в `SpotifyAuthService.swift`
-
 ---
 
-## Етапи Розробки
+## Статус Фаз та Прогрес Розробки
 
-### Фаза 1: Фундамент (Тиждень 1)
-- [x] Створити Xcode проєкт
-- [x] Налаштувати структуру папок
-- [x] Реалізувати `ThemeManager` з палітрою кольорів
-- [x] Базовий `TabView` з 4 табами (Головна, Пошук, Пристрої, Налаштування)
-- [x] Моделі даних (`Track`, `AudioDevice`, `Playlist`, `SpotifyModels`)
+### Фази 1–6 (Базовий функціонал та Полірування) — ПОВНІСТЮ ЗАВЕРШЕНО ✅
+- [x] **Фаза 1: Фундамент** — XcodeGen, архітектура, моделі даних, `ThemeManager`, `AppFonts`, базовий таб-бар.
+- [x] **Фаза 2: Аудіо та Spotify** — `SpotifyAuthService`, `SpotifyAPIService`, `AudioEngine` на AVPlayer, `FadeInEngine`, `SafeVolumeManager`.
+- [x] **Фаза 3: UI Головна та Пошук** — `HomeView` з каруселями, `SearchView` з 0.5с debounce, `SpotifyTrackRow`.
+- [x] **Фаза 4: Інтерактивний Плеєр** — морфінг-плеєр, екстракція кольору з обкладинки, жести закриття, таймлайн та контроли.
+- [x] **Фаза 5: Safe Volume Handoff** — `DeviceDiscoveryService` на системних маршрутах, `DevicesView`, `HandoffConfirmSheet`, розрахунок безпеки.
+- [x] **Фаза 6: Екосистема, Налаштування та Полірування**:
+  - Налаштування у стилі Apple Settings.
+  - On-demand активація `MPVolumeView` у `SystemVolumeController` для захисту системного HUD.
+  - Mac MenuBar додаток `CastlieMac` та WebSocket релей `castlie.dron.lol`.
+  - 15-секундний heartbeat проти таймаутів Cloudflare.
+  - Оптимізація 120 FPS ProMotion, обмеження пам'яті кешу зображень.
+  - Живий еквалайзер `AnimatedWaveform` на `TimelineView` (0% CPU на паузі).
+  - Повна відповідність Swift 6 Strict Concurrency.
 
-### Фаза 2: Spotify та Аудіо (Тиждень 1-2)
-- [x] `SpotifyAuthService` — Client Credentials flow
-- [x] `SpotifyAPIService` — пошук, нові релізи, рекомендації
-- [x] `AudioEngine` — відтворення 30с прев'ю через AVPlayer
-- [x] `FadeInEngine` — плавне наростання гучності
-- [x] `SafeVolumeManager` — логіка перевірки рівня безпеки
 
-### Фаза 3: UI Головна та Пошук (Тиждень 2)
-- [x] Екран Головна (нові релізи, категорії, плейлисти)
-- [x] Екран Пошук (поле вводу, результати, обкладинки)
-- [x] Міні-плеєр
-- [x] Повноекранний плеєр з адаптивним фоном
-- [x] Анімація переходу міні → повний плеєр
-
-### Фаза 4: Safe Volume Handoff (Тиждень 3)
-- [x] Виявлення AirPlay-пристроїв
-- [x] Виявлення Bluetooth-пристроїв
-- [x] Екран пристроїв з картками
-- [x] Попередній перегляд гучності
-- [x] Діалог підтвердження підключення
-- [x] Історія пристроїв
-- [x] Кольорова індикація рівня безпеки
-
-### Фаза 5: Розширений функціонал (Тиждень 3-4)
-- [x] Night Mode з автоматичним розкладом
-- [x] Максимальний поріг гучності
-- [x] Екран налаштувань
-- [x] Історія пристроїв та рекомендації
-- [x] Плейлисти (створення та збереження вподобаних треків)
-
-### Фаза 6: Полірування (Тиждень 4)
-- [x] Адаптивний фон на основі обкладинки
-- [x] Мікро-анімації та переходи (AnimatedWaveform, GlowingButton, fadeInTransition)
-- [x] Тестування на фізичному iPhone / iOS Simulator
-- [x] Повна оптимізація та Swift 6 strict concurrency
-
-### Фаза 7: Повноцінний Плеєр Spotify (Full Playback)
-- [ ] Дослідити архітектуру Spotify Web Playback SDK, Spotify Connect API та Spotify App Remote
-- [ ] Реалізувати OAuth 2.0 PKCE авторизацію для користувачів Spotify Premium
-- [ ] Додати `SpotifyConnectService` для відтворення повних треків та контролю гучності пристроїв
-- [ ] Інтегрувати виявлення Spotify Connect колонок у вкладку "Пристрої" із Safe Volume Handoff
-- [ ] Розгорнути Web Playback SDK на Mac-ресивері (`castlie.dron.lol`) для повного відтворення на Mac
-
----
-
-## Зв'язок з Дослідженням
-
-Кожна функція додатку безпосередньо відповідає знахідкам з [лабораторної роботи](file:///Users/dronchik/Documents/GitHub/Safe-Volume-Handoff/Лаба%201%20ЛМВ.pdf):
-
-| Знахідка дослідження | Цитата респондента | Функція додатку |
-|---|---|---|
-| П2: Страх раптового звуку | R1: *«Вагаюся або відмовляюся вмикати колонку»* | Night Mode + Fade-in |
-| П9: Немає контролю до підключення | R3: *«На телефоні зменшую гучність»* | Попередній перегляд гучності |
-| Хибний workaround | R3: Скручує звук телефону, думаючи це вплине на колонку | Діалог з реальною гучністю пристрою |
-| Радикальні методи при збої | R1: *«Виключав та включав блютуз»* | Чітка кнопка від'єднання |
