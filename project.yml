@@ -2,7 +2,8 @@ name: Castlie
 options:
   bundleIdPrefix: com.castlie
   deploymentTarget:
-    iOS: "26.0"
+    iOS: "26.1"
+  developmentLanguage: uk
   xcodeVersion: "27.0"
   createIntermediateGroups: true
   generateEmptyDirectories: true
@@ -37,8 +38,6 @@ targets:
       properties:
         UIBackgroundModes:
           - audio
-        NSMicrophoneUsageDescription: "Castlie потребує доступ до мікрофону для виявлення та перемикання Bluetooth-пристроїв"
-        NSBluetoothAlwaysUsageDescription: "Castlie потребує Bluetooth для підключення до аудіо-пристроїв"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.castlie.app

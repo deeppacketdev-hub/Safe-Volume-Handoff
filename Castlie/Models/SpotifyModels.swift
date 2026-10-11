@@ -45,22 +45,32 @@ struct SpotifyTrack: Codable, Identifiable {
 }
 
 // MARK: - Artist
-struct SpotifyArtist: Codable, Identifiable {
+struct SpotifyArtist: Codable, Identifiable, Hashable {
     let id: String
     let name: String
 }
 
 // MARK: - Album
-struct SpotifyAlbum: Codable, Identifiable {
+struct SpotifyAlbum: Codable, Identifiable, Hashable {
     let id: String
     let name: String
     let images: [SpotifyImage]
     let releaseDate: String?
     var artists: [SpotifyArtist]? = nil
+
+    var imageURL: URL? { images.first.flatMap { URL(string: $0.url) } }
+
+    var artistNames: String? {
+        guard let artists, !artists.isEmpty else { return nil }
+        return artists.map(\.name).joined(separator: ", ")
+    }
+
+    /// "2024" з "2024-05-17"
+    var releaseYear: String? { releaseDate.map { String($0.prefix(4)) } }
 }
 
 // MARK: - Image
-struct SpotifyImage: Codable {
+struct SpotifyImage: Codable, Hashable {
     let url: String
     let height: Int?
     let width: Int?
@@ -73,24 +83,4 @@ struct SpotifyNewReleasesResponse: Codable {
 
 struct SpotifyAlbumsContainer: Codable {
     let items: [SpotifyAlbum]
-}
-
-// MARK: - Categories Response
-struct SpotifyCategoriesResponse: Codable {
-    let categories: SpotifyCategoriesContainer
-}
-
-struct SpotifyCategoriesContainer: Codable {
-    let items: [SpotifyCategory]
-}
-
-struct SpotifyCategory: Codable, Identifiable {
-    let id: String
-    let name: String
-    let icons: [SpotifyImage]
-}
-
-// MARK: - Recommendations Response
-struct SpotifyRecommendationsResponse: Codable {
-    let tracks: [SpotifyTrack]
 }

@@ -2,147 +2,115 @@ import SwiftUI
 
 struct AlbumDetailView: View {
     let album: SpotifyAlbum
-    
+
     @State private var tracks: [Track] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
-    @State private var audioEngine = AudioEngine.shared
-    
+
+    private let engine = AudioEngine.shared
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // Album Header
-                HStack(spacing: 16) {
-                    AsyncImage(url: album.images.first.flatMap { URL(string: $0.url) }) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        case .failure, .empty:
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(ThemeManager.shared.cardBackground)
-                                .overlay {
-                                    Image(systemName: "music.note")
-                                        .font(.system(size: 36))
-                                        .foregroundStyle(ThemeManager.shared.secondaryText)
-                                }
-                        @unknown default:
-                            EmptyView()
-                        }
-                    }
-                    .frame(width: 100, height: 100)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(album.name)
-                            .font(AppFonts.title2)
-                            .foregroundStyle(ThemeManager.shared.primaryText)
-                            .lineLimit(2)
-                        
-                        if let artists = album.artists, !artists.isEmpty {
-                            Text(artists.map(\.name).joined(separator: ", "))
-                                .font(AppFonts.subheadline)
-                                .foregroundStyle(ThemeManager.shared.secondaryText)
-                                .lineLimit(1)
-                        } else if let firstTrack = tracks.first {
-                            Text(firstTrack.artistName)
-                                .font(AppFonts.subheadline)
-                                .foregroundStyle(ThemeManager.shared.secondaryText)
-                                .lineLimit(1)
-                        }
-                        
-                        if let date = album.releaseDate {
-                            Text("Реліз: \(date)")
-                                .font(AppFonts.caption)
-                                .foregroundStyle(ThemeManager.shared.secondaryText)
-                        }
-                    }
-                    
-                    Spacer()
-                }
-                .padding(.horizontal)
-                .padding(.top, 8)
-                
-                // Play Button
-                if !tracks.isEmpty {
-                    HStack {
-                        GlowingButton(
-                            title: "Відтворити альбом",
-                            icon: "play.fill",
-                            color: ThemeManager.shared.accent,
-                            isFullWidth: true
-                        ) {
-                            audioEngine.play(tracks: tracks, startIndex: 0)
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-                
-                // Loading / Error / Tracks
+            VStack(spacing: 20) {
+                header
+
                 if isLoading {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                            .tint(ThemeManager.shared.accent)
-                        Spacer()
+                    ProgressView()
+                        .controlSize(.large)
+                        .padding(.top, 40)
+                } else if let errorMessage {
+                    ContentUnavailableView {
+                        Label("Не вдалося завантажити треки", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(errorMessage)
+                    } actions: {
+                        Button("Спробувати ще раз") { Task { await load() } }
+                            .buttonStyle(.glassProminent)
+                            .tint(Theme.accent)
                     }
-                    .padding(.vertical, 40)
-                } else if let error = errorMessage {
-                    VStack(spacing: 8) {
-                        Text("Не вдалося завантажити треки")
-                            .font(AppFonts.headline)
-                            .foregroundStyle(ThemeManager.shared.primaryText)
-                        Text(error)
-                            .font(AppFonts.caption)
-                            .foregroundStyle(ThemeManager.shared.secondaryText)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 30)
                 } else {
-                    LazyVStack(spacing: 4) {
+                    LazyVStack(spacing: 0) {
                         ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                            SpotifyTrackRow(track: track) {
-                                audioEngine.play(tracks: tracks, startIndex: index)
+                            TrackRow(track: track, leading: .number(index + 1)) {
+                                engine.play(tracks: tracks, startIndex: index)
                             }
+                            .padding(.leading, 16)
+                            .padding(.trailing, 8)
                         }
                     }
+                    Text(Format.tracks(tracks.count))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
                 }
             }
-            .padding(.top)
-            .padding(.bottom, audioEngine.currentTrack != nil ? 80 : 24)
+            .padding(.bottom, 24)
         }
-        .background(ThemeManager.shared.primaryBackground.ignoresSafeArea())
+        .scrollIndicators(.hidden)
+        .background(Theme.background)
         .navigationTitle(album.name)
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await loadTracks()
+        .task { if tracks.isEmpty { await load() } }
+    }
+
+    private var header: some View {
+        VStack(spacing: 14) {
+            ArtworkImage(url: album.imageURL, size: 240, cornerRadius: 14)
+                .frame(width: 240, height: 240)
+                .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
+                .padding(.top, 8)
+
+            VStack(spacing: 4) {
+                Text(album.name)
+                    .font(.title2.weight(.bold))
+                    .multilineTextAlignment(.center)
+                if let artists = album.artistNames {
+                    Text(artists)
+                        .font(.title3)
+                        .foregroundStyle(Theme.accent)
+                        .multilineTextAlignment(.center)
+                }
+                if let year = album.releaseYear {
+                    Text("Альбом · \(year)")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 24)
+
+            HStack(spacing: 12) {
+                Button {
+                    engine.play(tracks: tracks)
+                } label: {
+                    Label("Слухати", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .tint(Theme.accent)
+
+                Button {
+                    engine.playShuffled(tracks)
+                } label: {
+                    Label("Перемішати", systemImage: "shuffle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+            }
+            .controlSize(.large)
+            .font(.body.weight(.semibold))
+            .disabled(tracks.isEmpty)
+            .padding(.horizontal, 20)
         }
     }
-    
-    private func loadTracks() async {
+
+    private func load() async {
         isLoading = true
         errorMessage = nil
         do {
             tracks = try await SpotifyAPIService.shared.getAlbumTracks(albumId: album.id)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = SpotifyError.message(for: error)
         }
         isLoading = false
     }
-}
-
-#Preview {
-    NavigationStack {
-        AlbumDetailView(
-            album: SpotifyAlbum(
-                id: "sample-album",
-                name: "After Hours",
-                images: [],
-                releaseDate: "2020",
-                artists: [SpotifyArtist(id: "1", name: "The Weeknd")]
-            )
-        )
-    }
-    .preferredColorScheme(.dark)
 }

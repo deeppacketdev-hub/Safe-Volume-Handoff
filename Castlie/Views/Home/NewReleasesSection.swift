@@ -2,88 +2,48 @@ import SwiftUI
 
 struct NewReleasesSection: View {
     let albums: [SpotifyAlbum]
-    
+    let zoom: Namespace.ID
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Нові релізи")
-                .font(AppFonts.title2)
-                .foregroundStyle(ThemeManager.shared.primaryText)
-                .padding(.horizontal)
-            
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 16) {
+            SectionHeader(title: "Нові релізи")
+
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(albums) { album in
-                        NavigationLink(destination: AlbumDetailView(album: album)) {
-                            AlbumCardView(album: album)
+                        NavigationLink(value: album) {
+                            AlbumCard(album: album)
+                                .matchedTransitionSource(id: album.id, in: zoom)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.pressable(scale: 0.96))
                     }
                 }
-                .padding(.horizontal)
+                .scrollTargetLayout()
             }
+            .contentMargins(.horizontal, 20, for: .scrollContent)
+            .scrollTargetBehavior(.viewAligned)
+            .scrollIndicators(.hidden)
         }
     }
 }
 
-// MARK: - Album Card
-
-struct AlbumCardView: View {
+private struct AlbumCard: View {
     let album: SpotifyAlbum
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Обкладинка
-            AsyncImage(url: album.images.first.flatMap { URL(string: $0.url) }) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                case .failure:
-                    albumPlaceholder
-                case .empty:
-                    albumPlaceholder
-                        .overlay {
-                            ProgressView()
-                                .tint(ThemeManager.shared.accent)
-                        }
-                @unknown default:
-                    albumPlaceholder
-                }
-            }
-            .frame(width: 160, height: 160)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            
-            // Назва альбому
-            Text(album.name)
-                .font(AppFonts.subheadline)
-                .fontWeight(.medium)
-                .foregroundStyle(ThemeManager.shared.primaryText)
-                .lineLimit(1)
-            
-            // Дата релізу
-            if let releaseDate = album.releaseDate {
-                Text(releaseDate)
-                    .font(AppFonts.caption)
-                    .foregroundStyle(ThemeManager.shared.secondaryText)
-            }
-        }
-        .frame(width: 160)
-    }
-    
-    private var albumPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 12)
-            .fill(ThemeManager.shared.cardBackground)
-            .overlay {
-                Image(systemName: "music.note")
-                    .font(.system(size: 30))
-                    .foregroundStyle(ThemeManager.shared.secondaryText)
-            }
-    }
-}
 
-#Preview {
-    NewReleasesSection(albums: [])
-        .preferredColorScheme(.dark)
-        .background(ThemeManager.shared.primaryBackground)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ArtworkImage(url: album.imageURL, size: 160, cornerRadius: 12)
+                .frame(width: 160, height: 160)
+            Text(album.name)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Text(album.artistNames ?? album.releaseYear ?? " ")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(width: 160, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
 }

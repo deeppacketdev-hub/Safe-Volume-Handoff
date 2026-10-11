@@ -3,90 +3,99 @@ import Observation
 
 @Observable
 @MainActor
-class SearchViewModel {
-    var searchText = ""
-    var results: [Track] = []
-    var recentTracks: [Track] = []
-    var isSearching = false
-    var errorMessage: String?
-    
+final class SearchViewModel {
+    enum Phase: Equatable {
+        case idle
+        case searching
+        case results
+        case empty
+        case failed(String)
+    }
+
+    var query = "" {
+        didSet {
+            guard query != oldValue else { return }
+            scheduleSearch()
+        }
+    }
+    private(set) var results: [Track] = []
+    private(set) var recentTracks: [Track] = []
+    private(set) var phase: Phase = .idle
+
     private let api = SpotifyAPIService.shared
     private var searchTask: Task<Void, Never>?
-    private let recentSearchesKey = "RecentSearchesTracks"
-    
+    private let recentKey = "RecentSearchesTracks"
+
     init() {
-        loadRecentTracks()
-    }
-    
-    /// Завантажити історію останніх треків з пошуку
-    func loadRecentTracks() {
-        guard let data = UserDefaults.standard.data(forKey: recentSearchesKey),
-              let tracks = try? JSONDecoder().decode([Track].self, from: data) else {
-            return
-        }
-        self.recentTracks = tracks
-    }
-    
-    /// Додати трек в історію останнього пошуку
-    func addRecentTrack(_ track: Track) {
-        var updated = recentTracks.filter { $0.id != track.id }
-        updated.insert(track, at: 0)
-        if updated.count > 30 {
-            updated = Array(updated.prefix(30))
-        }
-        recentTracks = updated
-        saveRecentTracks()
-    }
-    
-    /// Видалити конкретний трек з останнього пошуку
-    func removeRecentTrack(_ track: Track) {
-        recentTracks.removeAll { $0.id == track.id }
-        saveRecentTracks()
-        HapticFeedbackService.light()
-    }
-    
-    /// Очистити всю історію останнього пошуку
-    func clearRecentTracks() {
-        recentTracks.removeAll()
-        saveRecentTracks()
-        HapticFeedbackService.light()
-    }
-    
-    private func saveRecentTracks() {
-        if let data = try? JSONEncoder().encode(recentTracks) {
-            UserDefaults.standard.set(data, forKey: recentSearchesKey)
+        if let data = UserDefaults.standard.data(forKey: recentKey),
+           let tracks = try? JSONDecoder().decode([Track].self, from: data) {
+            recentTracks = tracks
         }
     }
-    
-    /// Виконати пошук з debounce
-    func performSearch() {
-        // Скасувати попередній пошук
+
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Пошук із затримкою, поки користувач друкує.
+    private func scheduleSearch() {
         searchTask?.cancel()
-        
-        let query = searchText.trimmingCharacters(in: .whitespaces)
-        guard !query.isEmpty else {
+        guard !trimmedQuery.isEmpty else {
             results = []
+            phase = .idle
             return
         }
-        
-        // Debounce: чекаємо 0.5 секунди
-        searchTask = Task {
-            try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5с
-            
+        phase = .searching
+        searchTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
-            
-            isSearching = true
-            errorMessage = nil
-            
-            do {
-                results = try await api.searchTracks(query: query)
-            } catch {
-                if !Task.isCancelled {
-                    errorMessage = error.localizedDescription
-                }
-            }
-            
-            isSearching = false
+            await self?.runSearch()
+        }
+    }
+
+    /// Пошук одразу (кнопка "Пошук" на клавіатурі або "Повторити").
+    func searchNow() {
+        searchTask?.cancel()
+        guard !trimmedQuery.isEmpty else { return }
+        phase = .searching
+        searchTask = Task { [weak self] in await self?.runSearch() }
+    }
+
+    private func runSearch() async {
+        let text = trimmedQuery
+        do {
+            let found = try await api.searchTracks(query: text)
+            guard !Task.isCancelled, text == trimmedQuery else { return }
+            results = found
+            phase = found.isEmpty ? .empty : .results
+        } catch {
+            guard !Task.isCancelled, (error as? URLError)?.code != .cancelled else { return }
+            phase = .failed(SpotifyError.message(for: error))
+        }
+    }
+
+    // MARK: - Recent
+
+    func addRecent(_ track: Track) {
+        recentTracks.removeAll { $0.id == track.id }
+        recentTracks.insert(track, at: 0)
+        if recentTracks.count > 30 { recentTracks.removeLast(recentTracks.count - 30) }
+        saveRecent()
+    }
+
+    func removeRecent(_ track: Track) {
+        recentTracks.removeAll { $0.id == track.id }
+        saveRecent()
+    }
+
+    func clearRecent() {
+        recentTracks.removeAll()
+        saveRecent()
+    }
+
+    private func saveRecent() {
+        if let data = try? JSONEncoder().encode(recentTracks) {
+            UserDefaults.standard.set(data, forKey: recentKey)
         }
     }
 }

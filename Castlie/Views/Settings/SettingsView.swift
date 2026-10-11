@@ -1,125 +1,204 @@
 import SwiftUI
 
 struct SettingsView: View {
-    // MARK: - Properties
-    @State private var viewModel = SettingsViewModel()
+    @Bindable private var safe = SafeVolumeManager.shared
+    @State private var serverDraft = CastlieConnectService.shared.serverDomain
+    @State private var showForgetConfirm = false
+    @FocusState private var serverFocused: Bool
 
-    // MARK: - Body
+    private let connect = CastlieConnectService.shared
+
     var body: some View {
         NavigationStack {
-            List {
+            Form {
+                safeVolumeSection
+                nightModeSection
+                devicesSection
+                connectSection
 
-                // 2. Нічний режим
-                Section {
-                    NightModeSettings()
-                } header: {
-                    SettingsSectionHeader(
-                        title: "Нічний режим",
-                        icon: "moon.fill",
-                        badgeColor: Color(hex: "5856D6")
-                    )
-                }
-
-                // 3. Плавний старт
-                Section {
-                    FadeInSettings()
-                } header: {
-                    SettingsSectionHeader(
-                        title: "Плавний старт",
-                        icon: "waveform.path",
-                        badgeColor: Color(hex: "00C7BE")
-                    )
-                }
-
-                // 4. Підключення та Handoff
-                Section {
-                    Toggle("Запитувати підтвердження", isOn: $viewModel.safeVolume.config.requireConfirmation)
-                        .tint(ThemeManager.shared.accent)
-
-
-                    HStack {
-                        Text("Сервер Connect")
-                            .foregroundStyle(ThemeManager.shared.primaryText)
-                        Spacer()
-                        TextField("castlie.dron.lol", text: Binding(
-                            get: { CastlieConnectService.shared.serverDomain },
-                            set: { CastlieConnectService.shared.serverDomain = $0 }
-                        ))
-                        .multilineTextAlignment(.trailing)
-                        .foregroundStyle(ThemeManager.shared.accent)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                    }
-                } header: {
-                    SettingsSectionHeader(
-                        title: "Підключення",
-                        icon: "antenna.radiowaves.left.and.right",
-                        badgeColor: Color(hex: "007AFF")
-                    )
-                } footer: {
-                    Text("Контроль гучності перед перенесенням аудіо на інший пристрій")
-                        .font(.system(size: 12))
-                        .foregroundStyle(ThemeManager.shared.secondaryText)
-                }
-
-                // 5. Про додаток
                 Section {
                     NavigationLink {
                         AboutView()
                     } label: {
-                        HStack {
-                            Text("Про Castlie")
-                                .foregroundStyle(ThemeManager.shared.primaryText)
-                            Spacer()
-                            Text("1.0.0")
-                                .font(.system(size: 14))
-                                .foregroundStyle(ThemeManager.shared.secondaryText)
-                        }
+                        SettingsLabel("Про Castlie", symbol: "info.circle.fill", color: .gray)
                     }
-                } header: {
-                    SettingsSectionHeader(
-                        title: "Інформація",
-                        icon: "info.circle.fill",
-                        badgeColor: Color(hex: "8E8E93")
-                    )
-                }
-            }
-            .listStyle(.insetGrouped)
-            .safeAreaInset(edge: .bottom) {
-                if AudioEngine.shared.currentTrack != nil {
-                    Color.clear.frame(height: 70)
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(ThemeManager.shared.primaryBackground.ignoresSafeArea())
+            .background(Theme.background)
             .navigationTitle("Налаштування")
-            .onChange(of: viewModel.safeVolume.config) { _, _ in
-                viewModel.saveAll()
+            .confirmationDialog("Забути всі пристрої?", isPresented: $showForgetConfirm, titleVisibility: .visible) {
+                Button("Забути всі", role: .destructive) {
+                    safe.forgetAll()
+                }
+            } message: {
+                Text("Збережена гучність для кожного пристрою буде видалена.")
             }
         }
     }
+
+    // MARK: - Sections
+
+    private var safeVolumeSection: some View {
+        Section {
+            Toggle(isOn: $safe.config.requireConfirmation) {
+                SettingsLabel("Підтверджувати гучність", symbol: "checkmark.shield.fill", color: .green)
+            }
+
+            Toggle(isOn: $safe.config.isFadeInEnabled.animation()) {
+                SettingsLabel("Плавне наростання", symbol: "waveform.path", color: .teal)
+            }
+
+            if safe.config.isFadeInEnabled {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Тривалість")
+                        Spacer()
+                        Text("\(String(format: "%.1f", safe.config.fadeInDuration)) с")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.numericText(value: safe.config.fadeInDuration))
+                            .animation(.snappy, value: safe.config.fadeInDuration)
+                    }
+                    Slider(value: $safe.config.fadeInDuration, in: 0.5...5, step: 0.5) {
+                        Text("Тривалість наростання")
+                    }
+                    .tint(Theme.accent)
+                }
+            }
+        } header: {
+            Text("Безпечна гучність")
+        } footer: {
+            Text("Перед підключенням пристрою Castlie показує вибір гучності. Звук стартує з тиші й плавно наростає до вибраного рівня.")
+        }
+    }
+
+    private var nightModeSection: some View {
+        Section {
+            Toggle(isOn: $safe.config.isNightModeEnabled.animation()) {
+                SettingsLabel("Нічний режим", symbol: "moon.fill", color: Theme.night)
+            }
+
+            if safe.config.isNightModeEnabled {
+                Picker("Початок", selection: $safe.config.nightModeStartHour) {
+                    ForEach(0..<24, id: \.self) { Text(Self.hourText($0)).tag($0) }
+                }
+                Picker("Кінець", selection: $safe.config.nightModeEndHour) {
+                    ForEach(0..<24, id: \.self) { Text(Self.hourText($0)).tag($0) }
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Максимальна гучність")
+                        Spacer()
+                        Text(Format.percent(safe.config.nightModeMaxVolume))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $safe.config.nightModeMaxVolume, in: 0.1...0.8, step: 0.05) {
+                        Text("Максимальна гучність уночі")
+                    }
+                    .tint(Theme.night)
+                }
+            }
+        } header: {
+            Text("Нічний режим")
+        } footer: {
+            if safe.config.isNightModeEnabled {
+                Text(safe.isNightModeActive
+                     ? "Діє зараз: гучність не підніметься вище \(Format.percent(safe.config.nightModeMaxVolume)), навіть кнопками iPhone."
+                     : "Увімкнеться о \(Self.hourText(safe.config.nightModeStartHour)).")
+            } else {
+                Text("Обмежує максимальну гучність у нічні години.")
+            }
+        }
+    }
+
+    private var devicesSection: some View {
+        Section {
+            LabeledContent {
+                Text("\(safe.knownDevices.count)")
+                    .monospacedDigit()
+            } label: {
+                SettingsLabel("Збережені пристрої", symbol: "hifispeaker.2.fill", color: Theme.accent)
+            }
+
+            Button("Забути всі пристрої", role: .destructive) {
+                showForgetConfirm = true
+            }
+            .disabled(safe.knownDevices.isEmpty)
+        } header: {
+            Text("Пристрої")
+        }
+    }
+
+    private var connectSection: some View {
+        Section {
+            HStack {
+                SettingsLabel("Сервер", symbol: "antenna.radiowaves.left.and.right", color: .blue)
+                Spacer()
+                TextField("castlie.dron.lol", text: $serverDraft)
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(.secondary)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    .submitLabel(.done)
+                    .focused($serverFocused)
+                    .onSubmit { connect.updateServerDomain(serverDraft) }
+            }
+
+            LabeledContent("Стан") {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(connect.isConnected ? Color.green : Color.orange)
+                        .frame(width: 8, height: 8)
+                    Text(connect.isConnected ? "На зв'язку" : "Підключення…")
+                }
+            }
+        } header: {
+            Text("Castlie Connect")
+        } footer: {
+            Text("Релей-сервер для передачі звуку на Castlie для Mac.")
+        }
+        .toolbar {
+            if serverFocused {
+                ToolbarItem(placement: .keyboard) {
+                    Button("Готово") {
+                        connect.updateServerDomain(serverDraft)
+                        serverFocused = false
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+        }
+    }
+
+    private static func hourText(_ hour: Int) -> String {
+        String(format: "%02d:00", hour)
+    }
 }
 
-// MARK: - Dedicated Subviews
-
-private struct SettingsSectionHeader: View {
+/// Рядок з кольоровою іконкою, як у системних Параметрах.
+struct SettingsLabel: View {
     let title: String
-    let icon: String
-    let badgeColor: Color
+    let symbol: String
+    let color: Color
+
+    init(_ title: String, symbol: String, color: Color) {
+        self.title = title
+        self.symbol = symbol
+        self.color = color
+    }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 22, height: 22)
-                .background(badgeColor)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-
+        Label {
             Text(title)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(ThemeManager.shared.secondaryText)
-                .textCase(nil)
+        } icon: {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 29, height: 29)
+                .background(color.gradient, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
     }
 }

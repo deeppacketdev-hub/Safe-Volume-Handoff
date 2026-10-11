@@ -1,8 +1,7 @@
 import Foundation
 
-@Observable
 @MainActor
-class SpotifyAPIService {
+final class SpotifyAPIService {
     static let shared = SpotifyAPIService()
     
     private let baseURL = "https://api.spotify.com/v1"

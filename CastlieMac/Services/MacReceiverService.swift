@@ -179,6 +179,7 @@ final class MacReceiverService: NSObject {
             let albumName = trackData["albumName"] as? String
             let albumArtURL = trackData["albumArtURL"] as? String
             let previewURLString = trackData["previewURL"] as? String
+            let startTime = (trackData["startTime"] as? NSNumber)?.doubleValue ?? 0
             
             let targetVol = (json["targetVolume"] as? NSNumber)?.floatValue ?? 0.35
             let fadeInDuration = (json["fadeInDuration"] as? NSNumber)?.doubleValue ?? 0.0
@@ -213,6 +214,10 @@ final class MacReceiverService: NSObject {
                 
                 print("[MacReceiver] ▶️ Playing \(trackName) with system volume \(Int(targetVol * 100))%")
                 self.audioPlayer.play(url: finalURL, targetVolume: targetVol, fadeInDuration: fadeInDuration)
+                // Продовжуємо з того місця, де трек грав на iPhone.
+                if startTime > 0.5 {
+                    self.audioPlayer.seek(to: startTime)
+                }
                 
                 // Broadcast updated playback state
                 self.send(json: [

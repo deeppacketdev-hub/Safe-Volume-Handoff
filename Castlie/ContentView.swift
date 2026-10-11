@@ -1,85 +1,61 @@
 import SwiftUI
 
+enum AppTab: Hashable {
+    case home, devices, settings, search
+}
+
 struct ContentView: View {
     @State private var selectedTab: AppTab = .home
-    @State private var audioEngine = AudioEngine.shared
-    @State private var showFullPlayer = false
-    @State private var showDevicesSheet = false
-    @State private var devicesSheetDetent: PresentationDetent = .medium
+    @State private var showPlayer = false
+    @State private var showDevices = false
+    @Namespace private var playerNamespace
+    @Environment(\.scenePhase) private var scenePhase
+
+    private let engine = AudioEngine.shared
 
     var body: some View {
-        GeometryReader { windowGeo in
-            let screenWidth = windowGeo.size.width
-            let screenHeight = windowGeo.size.height
-            let safeTop = windowGeo.safeAreaInsets.top > 0 ? windowGeo.safeAreaInsets.top : 59
-            let safeBottom = windowGeo.safeAreaInsets.bottom > 0 ? windowGeo.safeAreaInsets.bottom : 34
-
-            ZStack(alignment: .topLeading) {
-                // 1. TabView
-                TabView(selection: $selectedTab) {
-                    HomeView()
-                        .tabItem {
-                            Label("Головна", systemImage: "music.note.house.fill")
-                        }
-                        .tag(AppTab.home)
-
-                    SearchView()
-                        .tabItem {
-                            Label("Пошук", systemImage: "magnifyingglass")
-                        }
-                        .tag(AppTab.search)
-
-                    DevicesView()
-                        .tabItem {
-                            Label("Пристрої", systemImage: "hifispeaker.2.fill")
-                        }
-                        .tag(AppTab.devices)
-
-                    SettingsView()
-                        .tabItem {
-                            Label("Налаштування", systemImage: "gearshape.fill")
-                        }
-                        .tag(AppTab.settings)
-                }
-                .tint(ThemeManager.shared.accent)
-                .frame(width: screenWidth, height: screenHeight)
-
-                // 2. Apple Interactive Morphing Player
-                if audioEngine.currentTrack != nil {
-                    FullPlayerView(
-                        isPresented: $showFullPlayer,
-                        showDevicesSheet: $showDevicesSheet,
-                        devicesSheetDetent: $devicesSheetDetent,
-                        selectedTab: selectedTab,
-                        screenWidth: screenWidth,
-                        screenHeight: screenHeight,
-                        safeTop: safeTop,
-                        safeBottom: safeBottom
-                    )
-                    .zIndex(20)
-                }
+        TabView(selection: $selectedTab) {
+            Tab("Головна", systemImage: "music.note.house.fill", value: AppTab.home) {
+                HomeView()
             }
-            .preferredColorScheme(.dark)
-            .animation(.spring(response: 0.38, dampingFraction: 0.84), value: audioEngine.currentTrack != nil)
+            Tab("Пристрої", systemImage: "hifispeaker.2.fill", value: AppTab.devices) {
+                DevicesView()
+            }
+            Tab("Налаштування", systemImage: "gearshape.fill", value: AppTab.settings) {
+                SettingsView()
+            }
+            Tab(value: AppTab.search, role: .search) {
+                SearchView()
+            }
         }
-        .ignoresSafeArea()
-        .sheet(isPresented: $showDevicesSheet) {
-            DevicesView(currentDetent: $devicesSheetDetent)
-                .presentationDetents([.medium, .large], selection: $devicesSheetDetent)
+        .tint(Theme.accent)
+        .tabBarMinimizeBehavior(.onScrollDown)
+        .tabViewBottomAccessory(isEnabled: engine.currentTrack != nil) {
+            MiniPlayer(onOpen: { showPlayer = true }, onDevices: { showDevices = true })
+                .matchedTransitionSource(id: "now-playing", in: playerNamespace)
+        }
+        .fullScreenCover(isPresented: $showPlayer) {
+            NowPlayingView()
+                .navigationTransition(.zoom(sourceID: "now-playing", in: playerNamespace))
+        }
+        .sheet(isPresented: $showDevices) {
+            DevicesView(presentation: .sheet)
+                .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
-                .presentationBackground(ThemeManager.shared.primaryBackground)
-                .ignoresSafeArea(edges: .bottom)
+        }
+        .statusBanners()
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            SafeVolumeManager.shared.refreshNightMode()
+            engine.reconcileVolumeAfterForeground()
+        }
+        .onChange(of: engine.currentTrack == nil) { _, isEmpty in
+            if isEmpty { showPlayer = false }
         }
     }
 }
 
-enum AppTab: String, CaseIterable {
-    case home
-    case search
-    case devices
-    case settings
-}
-
 #Preview {
     ContentView()
+        .preferredColorScheme(.dark)
 }

@@ -1,8 +1,7 @@
 import Foundation
 
-@Observable
 @MainActor
-class SpotifyAuthService {
+final class SpotifyAuthService {
     static let shared = SpotifyAuthService()
     
     private let clientId = "1cbe4690e8b943798c9cffef250c1f23"
@@ -70,19 +69,32 @@ class SpotifyAuthService {
 enum SpotifyError: LocalizedError {
     case authenticationFailed
     case requestFailed(statusCode: Int)
-    case noPreviewAvailable
-    case decodingFailed
-    
+
     var errorDescription: String? {
         switch self {
         case .authenticationFailed:
-            return "Не вдалося авторизуватися в Spotify"
-        case .requestFailed(let code):
-            return "Помилка запиту: \(code)"
-        case .noPreviewAvailable:
-            return "Прев'ю недоступне для цього треку"
-        case .decodingFailed:
-            return "Помилка обробки даних"
+            return "Не вдалося підключитися до Spotify"
+        case .requestFailed(429):
+            return "Забагато запитів. Спробуйте за хвилину"
+        case .requestFailed:
+            return "Spotify тимчасово недоступний"
         }
+    }
+
+    /// Зрозуміле повідомлення для будь-якої помилки мережі.
+    static func message(for error: Error) -> String {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
+                return "Немає з'єднання з інтернетом"
+            case .timedOut:
+                return "Сервер не відповідає. Спробуйте ще раз"
+            default:
+                return "Помилка мережі. Спробуйте ще раз"
+            }
+        }
+        if let spotify = error as? SpotifyError, let text = spotify.errorDescription { return text }
+        if error is DecodingError { return "Не вдалося обробити відповідь Spotify" }
+        return "Щось пішло не так. Спробуйте ще раз"
     }
 }

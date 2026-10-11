@@ -6,116 +6,150 @@ struct CastlieRemoteDevice: Identifiable, Hashable {
     var name: String
     var volume: Float
     var isPlaying: Bool
-    var currentTrackTitle: String?
-    var connectedUser: String?
-    var isOnline: Bool = true
+
+    var audioDevice: AudioDevice {
+        AudioDevice(id: id, name: name, type: .mac, connection: .castlieConnect)
+    }
 }
 
+/// Зв'язок з Castlie на Mac через WebSocket-релей.
 @Observable
 @MainActor
-final class CastlieConnectService: NSObject {
+final class CastlieConnectService {
     static let shared = CastlieConnectService()
-    
-    // Server Config
-    var serverDomain: String {
-        didSet {
-            UserDefaults.standard.set(serverDomain, forKey: "CastlieServerDomain")
-            connect()
-        }
-    }
-    
-    private(set) var isConnected: Bool = false
-    private(set) var isConnecting: Bool = false
+
+    private(set) var serverDomain: String
+    private(set) var isConnected = false
     private(set) var availableReceivers: [CastlieRemoteDevice] = []
-    
-    // Активний віддалений пристрій (Mac), на який зараз транслюється аудіо
-    var activeRemoteDevice: CastlieRemoteDevice? = nil
-    
+    /// Mac, на який зараз іде звук.
+    private(set) var activeRemoteDevice: CastlieRemoteDevice?
+
     private var webSocketTask: URLSessionWebSocketTask?
-    private var session: URLSession?
+    private let session: URLSession
     private var pingTimer: Timer?
     private var reconnectTask: Task<Void, Never>?
-    
-    private override init() {
-        self.serverDomain = UserDefaults.standard.string(forKey: "CastlieServerDomain") ?? "castlie.dron.lol"
-        super.init()
-        setupSession()
-        connect()
-    }
-    
-    private func setupSession() {
+    private var remoteGraceTask: Task<Void, Never>?
+    private let senderId = "iphone_" + UUID().uuidString.prefix(6)
+
+    // Гучність на Mac: не частіше ніж раз на 50 мс, плюс ігнор власного "ехо" від сервера.
+    private var pendingVolume: (deviceId: String, volume: Float)?
+    private var volumeFlushTask: Task<Void, Never>?
+    private var lastVolumeSent = Date.distantPast
+
+    private init() {
+        serverDomain = UserDefaults.standard.string(forKey: "CastlieServerDomain") ?? "castlie.dron.lol"
         let config = URLSessionConfiguration.default
         config.waitsForConnectivity = true
         session = URLSession(configuration: config)
+        connect()
     }
-    
+
     // MARK: - Connection
-    
+
+    func updateServerDomain(_ domain: String) {
+        let clean = domain.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean != serverDomain else { return }
+        serverDomain = clean
+        UserDefaults.standard.set(clean, forKey: "CastlieServerDomain")
+        connect()
+    }
+
     func connect() {
         reconnectTask?.cancel()
-        disconnect()
-        
-        isConnecting = true
-        let cleanDomain = serverDomain.trimmingCharacters(in: .whitespacesAndNewlines)
-        let urlString = "wss://\(cleanDomain)/ws?roomId=default"
-        guard let url = URL(string: urlString) else {
-            isConnecting = false
-            return
+        closeSocket()
+        guard let url = URL(string: "wss://\(serverDomain)/ws?roomId=default") else { return }
+
+        let task = session.webSocketTask(with: url)
+        webSocketTask = task
+        task.resume()
+        send(["type": "register", "role": "sender", "deviceId": senderId, "name": "iPhone"])
+        listen(on: task)
+
+        pingTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { _ in
+            Task { @MainActor in CastlieConnectService.shared.sendPing() }
         }
-        
-        webSocketTask = session?.webSocketTask(with: url)
-        webSocketTask?.resume()
-        
-        // Register as sender (iPhone)
-        registerSender()
-        listen()
-        startPingTimer()
     }
-    
-    func disconnect() {
+
+    private func closeSocket() {
         pingTimer?.invalidate()
         pingTimer = nil
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
         isConnected = false
-        isConnecting = false
     }
-    
-    private func startPingTimer() {
-        pingTimer?.invalidate()
-        pingTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.sendPing()
-            }
-        }
-    }
-    
+
     private func sendPing() {
-        webSocketTask?.sendPing { [weak self] error in
-            if error != nil {
-                Task { @MainActor in
-                    self?.handleConnectionFailure()
-                }
+        guard let task = webSocketTask else { return }
+        task.sendPing { error in
+            guard error != nil else { return }
+            Task { @MainActor in CastlieConnectService.shared.handleConnectionFailure(of: task) }
+        }
+    }
+
+    /// Помилки від уже закритого сокета ігноруємо, щоб не рвати нове з'єднання.
+    private func handleConnectionFailure(of task: URLSessionWebSocketTask) {
+        guard webSocketTask === task else { return }
+        closeSocket()
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            self?.connect()
+        }
+        // Якщо сервер не повернеться швидко, Mac уже не керується — закриваємо сесію безпечно.
+        if activeRemoteDevice != nil, remoteGraceTask == nil {
+            remoteGraceTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(10))
+                guard !Task.isCancelled, let self else { return }
+                self.remoteGraceTask = nil
+                if !self.isConnected { self.remoteLost() }
             }
         }
     }
-    
-    // MARK: - Messaging
-    
-    private func registerSender() {
-        let payload: [String: Any] = [
-            "type": "register",
-            "role": "sender",
-            "deviceId": "iphone_" + UUID().uuidString.prefix(6),
-            "name": "iPhone"
-        ]
-        send(json: payload)
+
+    // MARK: - Remote session
+
+    func connectToRemote(_ device: CastlieRemoteDevice) {
+        if let previous = activeRemoteDevice, previous.id != device.id {
+            sendPlaybackCommand(deviceId: previous.id, action: "stop")
+            clearActive(previous.id)
+        }
+        activeRemoteDevice = device
+        AudioEngine.shared.didConnectRemote(device)
     }
-    
-    /// Надіслати трек на віддалений Mac із Safe Fade-In
-    func sendHandoff(to deviceId: String, track: Track, previewURL: URL? = nil, targetVolume: Float, fadeInDuration: Double) {
-        let finalURLString = previewURL?.absoluteString ?? track.previewURL?.absoluteString
-        let payload: [String: Any] = [
+
+    /// Користувач сам повертає звук з Mac на iPhone.
+    func disconnectActiveRemote(continueLocally: Bool = true, volume: Float? = nil) {
+        guard let active = activeRemoteDevice else { return }
+        sendPlaybackCommand(deviceId: active.id, action: "stop")
+        clearActive(active.id)
+        AudioEngine.shared.didDisconnectRemote(continueLocally: continueLocally, volume: volume)
+    }
+
+    private func clearActive(_ id: String) {
+        activeRemoteDevice = nil
+        if let index = availableReceivers.firstIndex(where: { $0.id == id }) {
+            availableReceivers[index].isPlaying = false
+        }
+    }
+
+    private func remoteLost() {
+        guard let active = activeRemoteDevice else { return }
+        clearActive(active.id)
+        AudioEngine.shared.didDisconnectRemote(continueLocally: false)
+    }
+
+    // MARK: - Commands
+
+    func sendHandoff(
+        to deviceId: String,
+        track: Track,
+        previewURL: URL,
+        targetVolume: Float,
+        fadeInDuration: Double,
+        startTime: Double
+    ) {
+        send([
             "type": "handoff",
             "targetDeviceId": deviceId,
             "senderName": "iPhone",
@@ -127,243 +161,160 @@ final class CastlieConnectService: NSObject {
                 "artistName": track.artistName,
                 "albumName": track.albumName,
                 "albumArtURL": track.albumImageURL?.absoluteString as Any,
-                "previewURL": finalURLString as Any
+                "previewURL": previewURL.absoluteString,
+                "startTime": startTime
             ]
-        ]
-        send(json: payload)
-    }
-    
-    /// Підключитись до віддаленого Mac для постійного стрімінгу
-    func connectToRemote(device: CastlieRemoteDevice) {
-        self.activeRemoteDevice = device
-        AudioEngine.shared.updateVolumeFromRemote(device.volume)
-    }
-    
-    /// Відключитись від активного Mac і повернути звук на iPhone
-    func disconnectActiveRemote() {
-        guard let active = activeRemoteDevice else { return }
-        sendPlaybackCommand(deviceId: active.id, action: "stop")
-        activeRemoteDevice = nil
-        if let idx = availableReceivers.firstIndex(where: { $0.id == active.id }) {
-            availableReceivers[idx].isPlaying = false
-            availableReceivers[idx].connectedUser = nil
-        }
-        AudioEngine.shared.handleRemoteDisconnected()
+        ])
     }
 
-    /// Оптимістичне оновлення стану для швидкого відгуку UI
-    func markReceiverAsPlaying(deviceId: String, volume: Float) {
-        if let idx = availableReceivers.firstIndex(where: { $0.id == deviceId }) {
-            availableReceivers[idx].isPlaying = true
-            availableReceivers[idx].volume = volume
-        }
-        if activeRemoteDevice?.id == deviceId {
-            activeRemoteDevice?.isPlaying = true
-            activeRemoteDevice?.volume = volume
-        }
-    }
-    
-    /// Змінити гучність віддаленого пристрою в реальному часі
     func setRemoteVolume(deviceId: String, volume: Float) {
-        let clamped = max(0, min(1, volume))
-        // Оптимістичне оновлення локального стейту
-        if let idx = availableReceivers.firstIndex(where: { $0.id == deviceId }) {
-            availableReceivers[idx].volume = clamped
+        let clamped = min(max(0, volume), 1)
+        if let index = availableReceivers.firstIndex(where: { $0.id == deviceId }) {
+            availableReceivers[index].volume = clamped
         }
         if activeRemoteDevice?.id == deviceId {
             activeRemoteDevice?.volume = clamped
         }
-        
-        let payload: [String: Any] = [
-            "type": "volume_update",
-            "targetDeviceId": deviceId,
-            "volume": clamped
-        ]
-        send(json: payload)
-    }
-    
-    /// Керування відтворенням на Mac (Play / Pause / Toggle / Seek / Stop)
-    func sendPlaybackCommand(deviceId: String, action: String, value: Any? = nil) {
-        var payload: [String: Any] = [
-            "type": "playback_command",
-            "targetDeviceId": deviceId,
-            "action": action
-        ]
-        if let value {
-            payload["value"] = value
-        }
-        send(json: payload)
-    }
-    
-    private func send(json: [String: Any]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: json),
-              let string = String(data: data, encoding: .utf8) else { return }
-        
-        webSocketTask?.send(.string(string)) { [weak self] error in
-            if error != nil {
-                Task { @MainActor in
-                    self?.handleConnectionFailure()
-                }
+
+        pendingVolume = (deviceId, clamped)
+        let elapsed = Date().timeIntervalSince(lastVolumeSent)
+        if elapsed >= 0.05 {
+            flushVolume()
+        } else if volumeFlushTask == nil {
+            volumeFlushTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(0.05 - elapsed))
+                self?.volumeFlushTask = nil
+                self?.flushVolume()
             }
         }
     }
-    
-    // MARK: - Listener
-    
-    private func listen() {
-        webSocketTask?.receive { [weak self] result in
+
+    private func flushVolume() {
+        guard let pending = pendingVolume else { return }
+        pendingVolume = nil
+        lastVolumeSent = Date()
+        send(["type": "volume_update", "targetDeviceId": pending.deviceId, "volume": pending.volume])
+    }
+
+    func sendPlaybackCommand(deviceId: String, action: String, value: Double? = nil) {
+        var payload: [String: Any] = ["type": "playback_command", "targetDeviceId": deviceId, "action": action]
+        if let value { payload["value"] = value }
+        send(payload)
+    }
+
+    private func send(_ json: [String: Any]) {
+        guard let task = webSocketTask,
+              let data = try? JSONSerialization.data(withJSONObject: json),
+              let text = String(data: data, encoding: .utf8) else { return }
+        task.send(.string(text)) { error in
+            guard error != nil else { return }
+            Task { @MainActor in CastlieConnectService.shared.handleConnectionFailure(of: task) }
+        }
+    }
+
+    // MARK: - Incoming
+
+    private func listen(on task: URLSessionWebSocketTask) {
+        task.receive { result in
             Task { @MainActor in
-                guard let self else { return }
+                let service = CastlieConnectService.shared
+                guard service.webSocketTask === task else { return }
                 switch result {
                 case .success(let message):
-                    self.isConnected = true
-                    self.isConnecting = false
-                    
+                    service.isConnected = true
+                    service.remoteGraceTask?.cancel()
+                    service.remoteGraceTask = nil
                     switch message {
-                    case .string(let text):
-                        self.handleIncomingText(text)
-                    case .data(let data):
-                        if let text = String(data: data, encoding: .utf8) {
-                            self.handleIncomingText(text)
-                        }
-                    @unknown default:
-                        break
+                    case .string(let text): service.handle(text)
+                    case .data(let data): service.handle(String(decoding: data, as: UTF8.self))
+                    @unknown default: break
                     }
-                    self.listen()
-                    
+                    service.listen(on: task)
                 case .failure:
-                    self.handleConnectionFailure()
+                    service.handleConnectionFailure(of: task)
                 }
             }
         }
     }
-    
-    private func handleIncomingText(_ text: String) {
+
+    private func handle(_ text: String) {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = json["type"] as? String else { return }
-        
+
         switch type {
         case "registered":
-            self.isConnected = true
-            self.isConnecting = false
-            
+            isConnected = true
+
         case "devices_list":
-            if let list = json["devices"] as? [[String: Any]] {
-                var receivers: [CastlieRemoteDevice] = []
-                var seenNames = Set<String>()
-                for item in list {
-                    if let role = item["role"] as? String, role == "receiver",
-                       let id = item["deviceId"] as? String,
-                       let name = item["name"] as? String {
-                        // Дедуплікація по імені — один Mac не повинен з'являтися двічі
-                        let nameNorm = name.trimmingCharacters(in: .whitespaces).lowercased()
-                        guard !seenNames.contains(nameNorm) else { continue }
-                        seenNames.insert(nameNorm)
-                        
-                        let vol = (item["volume"] as? NSNumber)?.floatValue ?? 0.5
-                        let isPlaying = (item["isPlaying"] as? Bool) ?? false
-                        receivers.append(CastlieRemoteDevice(
-                            id: id,
-                            name: name,
-                            volume: vol,
-                            isPlaying: isPlaying,
-                            connectedUser: item["connectedUser"] as? String,
-                            isOnline: true
-                        ))
-                    }
-                }
-                self.availableReceivers = receivers
-                
-                // Якщо ми підключені до пристрою, синхронізуємо його поточні дані
-                if let active = self.activeRemoteDevice {
-                    if let updated = receivers.first(where: { $0.id == active.id }) {
-                        self.activeRemoteDevice = updated
-                    }
+            // Після перезапуску Mac на сервері може ще висіти старий запис з тією ж назвою — лишаємо новіший.
+            var receivers: [CastlieRemoteDevice] = []
+            for item in json["devices"] as? [[String: Any]] ?? [] {
+                guard let device = Self.receiver(from: item) else { continue }
+                receivers.removeAll { $0.id == device.id || $0.audioDevice.matchKey == device.audioDevice.matchKey }
+                receivers.append(device)
+            }
+            availableReceivers = receivers
+            if let active = activeRemoteDevice {
+                if let updated = receivers.first(where: { $0.id == active.id }) {
+                    activeRemoteDevice?.isPlaying = updated.isPlaying
+                } else {
+                    remoteLost()
                 }
             }
-            
+
         case "device_joined":
-            if let item = json["device"] as? [String: Any],
-               let role = item["role"] as? String, role == "receiver",
-               let id = item["deviceId"] as? String,
-               let name = item["name"] as? String {
-                let vol = (item["volume"] as? NSNumber)?.floatValue ?? 0.5
-                let isPlaying = (item["isPlaying"] as? Bool) ?? false
-                let newDev = CastlieRemoteDevice(
-                    id: id,
-                    name: name,
-                    volume: vol,
-                    isPlaying: isPlaying,
-                    connectedUser: item["connectedUser"] as? String,
-                    isOnline: true
-                )
-                // Дедуплікація: видаляємо старі записи з тим же id АБО тим же ім'ям
-                let nameNorm = name.trimmingCharacters(in: .whitespaces).lowercased()
-                availableReceivers.removeAll(where: {
-                    $0.id == id || $0.name.trimmingCharacters(in: .whitespaces).lowercased() == nameNorm
-                })
-                availableReceivers.append(newDev)
-            }
-            
+            guard let item = json["device"] as? [String: Any], let device = Self.receiver(from: item) else { return }
+            availableReceivers.removeAll { $0.id == device.id || $0.audioDevice.matchKey == device.audioDevice.matchKey }
+            availableReceivers.append(device)
+
         case "device_left":
-            if let id = json["deviceId"] as? String {
-                availableReceivers.removeAll(where: { $0.id == id })
-                if activeRemoteDevice?.id == id {
-                    activeRemoteDevice = nil
-                    AudioEngine.shared.handleRemoteDisconnected()
-                }
-            }
-            
+            guard let id = json["deviceId"] as? String else { return }
+            availableReceivers.removeAll { $0.id == id }
+            if activeRemoteDevice?.id == id { remoteLost() }
+
         case "volume_changed":
-            if let id = json["deviceId"] as? String,
-               let newVol = (json["volume"] as? NSNumber)?.floatValue {
-                if let idx = availableReceivers.firstIndex(where: { $0.id == id }) {
-                    availableReceivers[idx].volume = newVol
-                }
-                if activeRemoteDevice?.id == id {
-                    activeRemoteDevice?.volume = newVol
-                    AudioEngine.shared.updateVolumeFromRemote(newVol)
-                }
+            guard let id = json["deviceId"] as? String,
+                  let volume = (json["volume"] as? NSNumber)?.floatValue else { return }
+            // Сервер повертає і наші власні зміни — поки користувач крутить гучність, ігноруємо їх.
+            guard Date().timeIntervalSince(lastVolumeSent) > 0.8, pendingVolume == nil else { return }
+            if let index = availableReceivers.firstIndex(where: { $0.id == id }) {
+                availableReceivers[index].volume = volume
             }
-            
+            if activeRemoteDevice?.id == id, abs((activeRemoteDevice?.volume ?? 0) - volume) > 0.005 {
+                activeRemoteDevice?.volume = volume
+                AudioEngine.shared.didReceiveRemoteVolume(volume)
+            }
+
         case "playback_state_updated":
-            if let id = json["deviceId"] as? String {
-                if let idx = availableReceivers.firstIndex(where: { $0.id == id }) {
-                    if let isPlay = json["isPlaying"] as? Bool {
-                        availableReceivers[idx].isPlaying = isPlay
-                    }
-                    if let user = json["connectedUser"] as? String {
-                        availableReceivers[idx].connectedUser = user
-                    }
-                }
-                if activeRemoteDevice?.id == id {
-                    if let isPlay = json["isPlaying"] as? Bool {
-                        activeRemoteDevice?.isPlaying = isPlay
-                        AudioEngine.shared.updatePlaybackState(isPlaying: isPlay)
-                    }
-                }
+            guard let id = json["deviceId"] as? String, let playing = json["isPlaying"] as? Bool else { return }
+            if let index = availableReceivers.firstIndex(where: { $0.id == id }) {
+                availableReceivers[index].isPlaying = playing
             }
-            
+            if activeRemoteDevice?.id == id {
+                activeRemoteDevice?.isPlaying = playing
+                AudioEngine.shared.handleRemotePlaybackState(isPlaying: playing)
+            }
+
         case "track_ended":
             if let id = json["deviceId"] as? String, activeRemoteDevice?.id == id {
-                print("[CastlieConnect] ⏭️ Remote Mac track ended, advancing to next song")
-                AudioEngine.shared.playNext(autoAdvance: true)
+                AudioEngine.shared.handleRemoteTrackEnded()
             }
-            
+
         default:
             break
         }
     }
-    
-    private func handleConnectionFailure() {
-        isConnected = false
-        isConnecting = false
-        
-        reconnectTask?.cancel()
-        reconnectTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
-            self.connect()
-        }
+
+    private static func receiver(from item: [String: Any]) -> CastlieRemoteDevice? {
+        guard (item["role"] as? String) == "receiver",
+              let id = item["deviceId"] as? String,
+              let name = item["name"] as? String else { return nil }
+        return CastlieRemoteDevice(
+            id: id,
+            name: name,
+            volume: (item["volume"] as? NSNumber)?.floatValue ?? 0.5,
+            isPlaying: item["isPlaying"] as? Bool ?? false
+        )
     }
 }

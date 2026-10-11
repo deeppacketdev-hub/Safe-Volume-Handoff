@@ -1,173 +1,126 @@
 import SwiftUI
 
 struct SearchView: View {
-    @State private var viewModel = SearchViewModel()
-    @State private var audioEngine = AudioEngine.shared
-    @FocusState private var isSearchFocused: Bool
+    @State private var model = SearchViewModel()
+    private let engine = AudioEngine.shared
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Поле пошуку
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(ThemeManager.shared.secondaryText)
+            content
+                .background(Theme.background)
+                .navigationTitle("Пошук")
+                .searchable(text: $model.query, prompt: "Треки та виконавці")
+                .onSubmit(of: .search) { model.searchNow() }
+        }
+    }
 
-                    TextField("Пошук треків...", text: $viewModel.searchText)
-                        .foregroundStyle(ThemeManager.shared.primaryText)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .submitLabel(.search)
-                        .focused($isSearchFocused)
-                        .onSubmit {
-                            viewModel.performSearch()
-                        }
-                        .onChange(of: viewModel.searchText) { _, _ in
-                            viewModel.performSearch()
-                        }
-
-                    if !viewModel.searchText.isEmpty {
-                        Button {
-                            viewModel.searchText = ""
-                            viewModel.results = []
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(ThemeManager.shared.secondaryText)
-                        }
-                    }
+    @ViewBuilder
+    private var content: some View {
+        if model.query.trimmingCharacters(in: .whitespaces).isEmpty {
+            recentList
+        } else {
+            switch model.phase {
+            case .searching where model.results.isEmpty:
+                ProgressView()
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .empty:
+                ContentUnavailableView.search(text: model.query)
+            case .failed(let message):
+                ContentUnavailableView {
+                    Label("Пошук не вдався", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(message)
+                } actions: {
+                    Button("Спробувати ще раз") { model.searchNow() }
+                        .buttonStyle(.glassProminent)
+                        .tint(Theme.accent)
                 }
-                .padding(12)
-                .background(ThemeManager.shared.cardBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal)
-                .padding(.top, 8)
-
-                // Контент
-                if !viewModel.searchText.isEmpty {
-                    if viewModel.isSearching {
-                        Spacer()
-                        ProgressView()
-                            .tint(ThemeManager.shared.accent)
-                        Spacer()
-                    } else if viewModel.results.isEmpty {
-                        Spacer()
-                        VStack(spacing: 8) {
-                            Image(systemName: "music.note.list")
-                                .font(.system(size: 40))
-                                .foregroundStyle(ThemeManager.shared.secondaryText)
-                            Text("Нічого не знайдено")
-                                .font(AppFonts.body)
-                                .foregroundStyle(ThemeManager.shared.secondaryText)
-                        }
-                        Spacer()
-                    } else {
-                        ScrollView {
-                            LazyVStack(spacing: 4) {
-                                ForEach(Array(viewModel.results.enumerated()), id: \.element.id) { index, track in
-                                    SpotifyTrackRow(track: track) {
-                                        // Dismiss keyboard instantly on track tap
-                                        isSearchFocused = false
-                                        viewModel.addRecentTrack(track)
-                                        audioEngine.play(
-                                            tracks: viewModel.results,
-                                            startIndex: index
-                                        )
-                                    }
-                                }
-                            }
-                            .padding(.top, 8)
-                            .padding(.bottom, audioEngine.currentTrack != nil ? 80 : 24)
-                        }
-                        .scrollDismissesKeyboard(.interactively)
-                    }
-                } else {
-                    if !viewModel.recentTracks.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("Останній пошук")
-                                    .font(AppFonts.headline)
-                                    .foregroundStyle(ThemeManager.shared.primaryText)
-
-                                Spacer()
-
-                                Button {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        viewModel.clearRecentTracks()
-                                    }
-                                } label: {
-                                    Text("Очистити все")
-                                        .font(AppFonts.caption)
-                                        .foregroundStyle(ThemeManager.shared.accent)
-                                }
-                            }
-                            .padding(.horizontal)
-                            .padding(.top, 16)
-
-                            ScrollView {
-                                LazyVStack(spacing: 4) {
-                                    ForEach(viewModel.recentTracks) { track in
-                                        HStack(spacing: 0) {
-                                            SpotifyTrackRow(track: track) {
-                                                // Dismiss keyboard instantly on track tap
-                                                isSearchFocused = false
-                                                viewModel.addRecentTrack(track)
-                                                audioEngine.play(
-                                                    tracks: viewModel.recentTracks,
-                                                    startIndex: viewModel.recentTracks.firstIndex(of: track) ?? 0
-                                                )
-                                            }
-
-                                            Button {
-                                                withAnimation(.easeInOut(duration: 0.2)) {
-                                                    viewModel.removeRecentTrack(track)
-                                                }
-                                            } label: {
-                                                Image(systemName: "xmark")
-                                                    .font(.caption2.weight(.bold))
-                                                    .foregroundStyle(ThemeManager.shared.secondaryText)
-                                                    .frame(width: 32, height: 32)
-                                                    .background(Color.white.opacity(0.06))
-                                                    .clipShape(Circle())
-                                            }
-                                            .padding(.trailing, 16)
-                                        }
-                                        .contextMenu {
-                                            Button(role: .destructive) {
-                                                withAnimation {
-                                                    viewModel.removeRecentTrack(track)
-                                                }
-                                            } label: {
-                                                Label("Видалити з пошуку", systemImage: "trash")
-                                            }
-                                        }
-                                    }
-                                }
-                                .padding(.top, 4)
-                                .padding(.bottom, audioEngine.currentTrack != nil ? 80 : 24)
-                            }
-                            .scrollDismissesKeyboard(.interactively)
-                        }
-                    } else {
-                        Spacer()
-                        VStack(spacing: 8) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 40))
-                                .foregroundStyle(ThemeManager.shared.secondaryText)
-                            Text("Введіть назву треку або виконавця")
-                                .font(AppFonts.body)
-                                .foregroundStyle(ThemeManager.shared.secondaryText)
-                        }
-                        Spacer()
-                    }
-                }
-            }
-            .background(ThemeManager.shared.primaryBackground.ignoresSafeArea())
-            .navigationTitle("Пошук")
-            .onTapGesture {
-                // Dismiss keyboard when tapping outside the text field
-                isSearchFocused = false
+            default:
+                resultsList
             }
         }
+    }
+
+    private var resultsList: some View {
+        List {
+            ForEach(Array(model.results.enumerated()), id: \.element.id) { index, track in
+                TrackRow(track: track) {
+                    model.addRecent(track)
+                    engine.play(tracks: model.results, startIndex: index)
+                }
+                .listRowStyle()
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .scrollDismissesKeyboard(.immediately)
+        .overlay(alignment: .top) {
+            if model.phase == .searching {
+                ProgressView()
+                    .padding(10)
+                    .glassEffect(.regular, in: .circle)
+                    .padding(.top, 8)
+                    .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: model.phase)
+    }
+
+    @ViewBuilder
+    private var recentList: some View {
+        if model.recentTracks.isEmpty {
+            ContentUnavailableView(
+                "Шукайте музику",
+                systemImage: "magnifyingglass",
+                description: Text("Введіть назву треку або ім'я виконавця.")
+            )
+        } else {
+            List {
+                Section {
+                    ForEach(model.recentTracks) { track in
+                        TrackRow(track: track) {
+                            // Порядок не змінюємо, щоб рядок не стрибав під пальцем.
+                            let snapshot = model.recentTracks
+                            engine.play(tracks: snapshot, startIndex: snapshot.firstIndex(of: track) ?? 0)
+                        }
+                        .listRowStyle()
+                        .swipeActions {
+                            Button("Видалити", systemImage: "trash", role: .destructive) {
+                                withAnimation { model.removeRecent(track) }
+                            }
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Нещодавні")
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(.primary)
+                            .textCase(nil)
+                        Spacer()
+                        Button("Очистити") {
+                            withAnimation { model.clearRecent() }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .tint(Theme.accent)
+                        .textCase(nil)
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .scrollDismissesKeyboard(.immediately)
+        }
+    }
+}
+
+private extension View {
+    func listRowStyle() -> some View {
+        self
+            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 8))
+            .listRowBackground(Color.clear)
+            .listRowSeparatorTint(.white.opacity(0.08))
+            .alignmentGuide(.listRowSeparatorLeading) { _ in 60 }
     }
 }
 

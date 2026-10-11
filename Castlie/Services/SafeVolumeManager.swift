@@ -1,216 +1,240 @@
-import Foundation
 import SwiftUI
 
+/// Правила безпечної гучності: пороги, нічний ліміт, пам'ять гучності для кожного пристрою.
 @Observable
 @MainActor
-class SafeVolumeManager {
+final class SafeVolumeManager {
     static let shared = SafeVolumeManager()
-    
-    var config = SafeVolumeConfig()
-    private(set) var deviceHistories: [DeviceHistoryEntry] = []
-    
-    private let storageKey = "SafeVolumeConfig"
-    private let historyKey = "DeviceHistories"
-    
-    private init() {
-        loadConfig()
-        loadHistories()
+
+    var config: SafeVolumeConfig {
+        didSet {
+            guard config != oldValue else { return }
+            saveConfig()
+            refreshNightMode()
+        }
     }
-    
-    // MARK: - Volume Safety
-    
-    enum SafetyLevel {
-        case safe       // Зелений — гучність ≤ 50%
-        case warning    // Жовтий — гучність 50-75%
-        case danger     // Червоний — гучність > 75%
-        
+
+    /// Чи діє зараз нічний ліміт (оновлюється щохвилини).
+    private(set) var isNightModeActive = false
+
+    /// Відомі пристрої, від останнього використаного до найстарішого.
+    private(set) var knownDevices: [KnownDevice] = []
+
+    private let configKey = "SafeVolumeConfig"
+    private let devicesKey = "Castlie.KnownDevices"
+    private var saveTask: Task<Void, Never>?
+    private var nightTimer: Timer?
+
+    private init() {
+        config = Self.loadConfig(key: configKey)
+        knownDevices = loadDevices()
+        isNightModeActive = config.isNightTime()
+        nightTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+            Task { @MainActor in SafeVolumeManager.shared.refreshNightMode() }
+        }
+    }
+
+    // MARK: - Safety levels
+
+    enum SafetyLevel: Equatable {
+        case safe, warning, danger
+
         var color: Color {
             switch self {
-            case .safe: return Color(hex: "34C759")
-            case .warning: return Color(hex: "FFD60A")
-            case .danger: return Color(hex: "FF3B30")
+            case .safe: Color(hex: "30D158")
+            case .warning: Color(hex: "FFD60A")
+            case .danger: Color(hex: "FF453A")
             }
         }
-        
-        var sfSymbol: String {
+
+        var symbol: String {
             switch self {
-            case .safe: return "checkmark.shield.fill"
-            case .warning: return "exclamationmark.triangle.fill"
-            case .danger: return "xmark.shield.fill"
+            case .safe: "checkmark.shield.fill"
+            case .warning: "exclamationmark.triangle.fill"
+            case .danger: "exclamationmark.shield.fill"
             }
         }
-        
+
         var label: String {
             switch self {
-            case .safe: return "Безпечний рівень"
-            case .warning: return "Підвищена гучність"
-            case .danger: return "Небезпечна гучність"
+            case .safe: "Безпечно"
+            case .warning: "Підвищена гучність"
+            case .danger: "Небезпечно для слуху"
             }
         }
     }
-    
-    /// Визначити рівень безпеки для заданої гучності (фіксовані пороги)
-    func safetyLevel(for volume: Float) -> SafetyLevel {
-        if volume <= 0.5 {
-            return .safe
-        } else if volume <= 0.75 {
-            return .warning
-        } else {
-            return .danger
+
+    /// Межі зон: для навушників суворіші, бо звук іде прямо у вухо.
+    func thresholds(for type: DeviceType) -> (safe: Float, warning: Float) {
+        type == .headphones ? (0.4, 0.6) : (0.5, 0.75)
+    }
+
+    func safetyLevel(for volume: Float, type: DeviceType) -> SafetyLevel {
+        let limits = thresholds(for: type)
+        if volume <= limits.safe + 0.001 { return .safe }
+        if volume <= limits.warning + 0.001 { return .warning }
+        return .danger
+    }
+
+    /// Максимум, який зараз дозволено виставити (нічний ліміт або 100%).
+    var maxAllowedVolume: Float {
+        isNightModeActive ? config.nightModeMaxVolume : 1
+    }
+
+    func clampToLimit(_ volume: Float) -> Float {
+        min(max(0, volume), maxAllowedVolume)
+    }
+
+    // MARK: - Volume memory
+
+    func defaultVolume(for type: DeviceType) -> Float {
+        switch type {
+        case .headphones: 0.25
+        case .iPhone: 0.35
+        case .mac: 0.4
+        default: 0.3
         }
     }
-    
-    /// Отримати рекомендовану початкову гучність для пристрою
-    func recommendedVolume(for device: AudioDevice) -> Float {
-        let cleanName = device.name.trimmingCharacters(in: .whitespaces).lowercased()
-        // Шукаємо в історії останнє підключення до цього пристрою (за ID або за назвою)
-        if let lastEntry = deviceHistories
-            .filter({ $0.deviceId == device.id || $0.deviceName.lowercased() == cleanName })
-            .sorted(by: { $0.timestamp > $1.timestamp })
-            .first {
-            var vol = lastEntry.volume
-            if config.isNightModeActive {
-                vol = min(vol, config.nightModeMaxVolume)
+
+    func knownDevice(for device: AudioDevice) -> KnownDevice? {
+        knownDevices.first { $0.id == device.id } ?? knownDevices.first { $0.device.matchKey == device.matchKey }
+    }
+
+    func savedVolume(for device: AudioDevice) -> Float? {
+        knownDevice(for: device)?.volume
+    }
+
+    /// Гучність, з якою безпечно почати на пристрої без підтвердження користувача:
+    /// остання збережена, але не вище жовтої зони та нічного ліміту.
+    func safeStartVolume(for device: AudioDevice) -> Float {
+        let base = savedVolume(for: device) ?? defaultVolume(for: device.type)
+        return min(base, thresholds(for: device.type).warning, maxAllowedVolume)
+    }
+
+    /// Запам'ятати гучність пристрою. Запис на диск відкладається, щоб не писати на кожен рух повзунка.
+    func remember(_ device: AudioDevice, volume: Float) {
+        guard device.connection != .castlieConnect else { return }
+        let clamped = min(max(0, volume), 1)
+        if let index = knownDevices.firstIndex(where: { $0.id == device.id }) {
+            var entry = knownDevices[index]
+            entry.volume = clamped
+            entry.name = device.name
+            entry.lastUsed = Date()
+            knownDevices[index] = entry
+            if index != 0 {
+                knownDevices.remove(at: index)
+                knownDevices.insert(entry, at: 0)
             }
-            return vol
-        }
-        
-        // Безпечні дефолти якщо історії немає
-        var defVol: Float = 0.30
-        if device.type == .headphones {
-            defVol = 0.25
-        } else if device.type == .iPhone {
-            defVol = 0.35
-        } else if device.type == .mac {
-            defVol = 0.40
-        }
-        
-        if config.isNightModeActive {
-            defVol = min(defVol, config.nightModeMaxVolume)
-        }
-        return defVol
-    }
-    
-    // MARK: - Device History
-    
-    /// Оновити збережену гучність для поточного пристрою
-    func updateDeviceVolume(deviceId: String, deviceName: String, volume: Float) {
-        let cleanName = deviceName.trimmingCharacters(in: .whitespaces)
-        guard !cleanName.isEmpty else { return }
-        let clamped = max(0, min(1, volume))
-        
-        if let idx = deviceHistories.firstIndex(where: {
-            $0.deviceId == deviceId || $0.deviceName.lowercased() == cleanName.lowercased()
-        }) {
-            let old = deviceHistories[idx]
-            deviceHistories[idx] = DeviceHistoryEntry(
-                deviceId: deviceId.isEmpty ? old.deviceId : deviceId,
-                deviceName: cleanName,
-                volume: clamped,
-                wasNightMode: config.isNightModeActive
-            )
-            saveHistories()
         } else {
-            recordConnection(deviceId: deviceId, deviceName: cleanName, volume: clamped)
+            knownDevices.removeAll { $0.device.matchKey == device.matchKey }
+            knownDevices.insert(KnownDevice(device: device, volume: clamped), at: 0)
+            if knownDevices.count > 30 { knownDevices.removeLast(knownDevices.count - 30) }
         }
+        scheduleSave()
     }
-    
-    /// Зберегти запис про підключення без дублювання
-    func recordConnection(deviceId: String, deviceName: String, volume: Float) {
-        let cleanName = deviceName.trimmingCharacters(in: .whitespaces)
-        guard !cleanName.isEmpty else { return }
-        let clamped = max(0, min(1, volume))
-        
-        // Видаляємо всі попередні записи для цього ж пристрою (за ID або за назвою)
-        deviceHistories.removeAll {
-            $0.deviceId == deviceId || $0.deviceName.lowercased() == cleanName.lowercased()
+
+    /// Позначити пристрій як щойно використаний, не змінюючи збережену гучність.
+    func markUsed(_ device: AudioDevice, currentVolume: Float) {
+        remember(device, volume: savedVolume(for: device) ?? currentVolume)
+    }
+
+    func forget(_ deviceId: String) {
+        knownDevices.removeAll { $0.id == deviceId }
+        scheduleSave()
+    }
+
+    func forgetAll() {
+        knownDevices.removeAll()
+        scheduleSave()
+    }
+
+    // MARK: - Night mode
+
+    func refreshNightMode() {
+        let active = config.isNightTime()
+        guard active != isNightModeActive else {
+            if active { AudioEngine.shared.enforceVolumeLimit() }
+            return
         }
-        
-        let entry = DeviceHistoryEntry(
-            deviceId: deviceId,
-            deviceName: cleanName,
-            volume: clamped,
-            wasNightMode: config.isNightModeActive
-        )
-        // Вставляємо оновлений запис на початок
-        deviceHistories.insert(entry, at: 0)
-        
-        // Тримаємо максимум 50 записів
-        if deviceHistories.count > 50 {
-            deviceHistories = Array(deviceHistories.prefix(50))
-        }
-        
-        saveHistories()
+        isNightModeActive = active
+        if active { AudioEngine.shared.enforceVolumeLimit() }
     }
-    
-    /// Видалити збережений пристрій з історії
-    func removeDevice(deviceId: String) {
-        deviceHistories.removeAll { $0.deviceId == deviceId }
-        saveHistories()
-        HapticFeedbackService.light()
-    }
-    
-    /// Отримати останню відому гучність для пристрою
-    func lastKnownVolume(for deviceId: String) -> Float? {
-        deviceHistories
-            .filter { $0.deviceId == deviceId }
-            .sorted { $0.timestamp > $1.timestamp }
-            .first?.volume
-    }
-    
-    /// Отримати останню відому гучність за назвою пристрою
-    func lastKnownVolume(forDeviceName name: String) -> Float? {
-        let clean = name.trimmingCharacters(in: .whitespaces).lowercased()
-        return deviceHistories
-            .filter { $0.deviceName.lowercased() == clean }
-            .sorted { $0.timestamp > $1.timestamp }
-            .first?.volume
-    }
-    
-    /// Отримати останню відому гучність для моделі AudioDevice
-    func lastKnownVolume(for device: AudioDevice) -> Float? {
-        if let byId = lastKnownVolume(for: device.id) {
-            return byId
-        }
-        return lastKnownVolume(forDeviceName: device.name)
-    }
-    
+
     // MARK: - Persistence
-    
-    func saveConfig() {
+
+    private func saveConfig() {
         if let data = try? JSONEncoder().encode(config) {
-            UserDefaults.standard.set(data, forKey: storageKey)
+            UserDefaults.standard.set(data, forKey: configKey)
         }
     }
-    
-    private func loadConfig() {
-        if let data = UserDefaults.standard.data(forKey: storageKey),
-           let saved = try? JSONDecoder().decode(SafeVolumeConfig.self, from: data) {
-            config = saved
+
+    private static func loadConfig(key: String) -> SafeVolumeConfig {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let saved = try? JSONDecoder().decode(SafeVolumeConfig.self, from: data) else {
+            return SafeVolumeConfig()
         }
+        return saved
     }
-    
-    private func saveHistories() {
-        if let data = try? JSONEncoder().encode(deviceHistories) {
-            UserDefaults.standard.set(data, forKey: historyKey)
-        }
-    }
-    
-    private func loadHistories() {
-        if let data = UserDefaults.standard.data(forKey: historyKey),
-           let saved = try? JSONDecoder().decode([DeviceHistoryEntry].self, from: data) {
-            // Очищення старих дублікатів за назвою пристрою
-            var seen = Set<String>()
-            var clean: [DeviceHistoryEntry] = []
-            for entry in saved.sorted(by: { $0.timestamp > $1.timestamp }) {
-                let key = entry.deviceName.trimmingCharacters(in: .whitespaces).lowercased()
-                if !seen.contains(key) {
-                    seen.insert(key)
-                    clean.append(entry)
-                }
+
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled, let self else { return }
+            if let data = try? JSONEncoder().encode(self.knownDevices) {
+                UserDefaults.standard.set(data, forKey: self.devicesKey)
             }
-            deviceHistories = clean
-            saveHistories()
         }
+    }
+
+    private func loadDevices() -> [KnownDevice] {
+        if let data = UserDefaults.standard.data(forKey: devicesKey),
+           let saved = try? JSONDecoder().decode([KnownDevice].self, from: data) {
+            return saved.sorted { $0.lastUsed > $1.lastUsed }
+        }
+        return migrateLegacyHistory()
+    }
+
+    /// Переносить історію зі старого формату (до перероблення) та прибирає зайві ключі.
+    private func migrateLegacyHistory() -> [KnownDevice] {
+        struct LegacyEntry: Decodable {
+            let deviceId: String
+            let deviceName: String
+            let volume: Float
+            let timestamp: Date
+        }
+        let defaults = UserDefaults.standard
+        defer {
+            defaults.removeObject(forKey: "DeviceHistories")
+            defaults.removeObject(forKey: "Castlie_LastConnectedBluetoothDevice")
+        }
+        guard let data = defaults.data(forKey: "DeviceHistories"),
+              let legacy = try? JSONDecoder().decode([LegacyEntry].self, from: data) else {
+            return []
+        }
+
+        let iPhoneNames: Set<String> = ["iphone", "цей iphone", "speaker", "динамік", "receiver"]
+        var result: [KnownDevice] = []
+        for entry in legacy.sorted(by: { $0.timestamp > $1.timestamp }) {
+            if entry.deviceId.hasPrefix("mac_") || entry.deviceId.hasPrefix("iphone_") { continue }
+            let key = AudioDevice.matchKey(entry.deviceName)
+            let device: AudioDevice
+            if entry.deviceId == AudioDevice.iPhone.id || iPhoneNames.contains(key) {
+                device = .iPhone
+            } else {
+                device = AudioDevice(
+                    id: entry.deviceId,
+                    name: entry.deviceName,
+                    type: AudioDevice.guessType(fromName: entry.deviceName, isAirPlay: false),
+                    connection: .bluetooth
+                )
+            }
+            guard !result.contains(where: { $0.id == device.id || $0.device.matchKey == device.matchKey }) else { continue }
+            result.append(KnownDevice(device: device, volume: entry.volume, lastUsed: entry.timestamp))
+        }
+        if let data = try? JSONEncoder().encode(result) {
+            defaults.set(data, forKey: devicesKey)
+        }
+        return result
     }
 }

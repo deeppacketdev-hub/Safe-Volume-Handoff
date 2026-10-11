@@ -1,197 +1,200 @@
 import SwiftUI
 
-struct HomeView: View {
-    @State private var viewModel = HomeViewModel()
-    @State private var audioEngine = AudioEngine.shared
-    @State private var playlistManager = PlaylistManager.shared
+enum LibraryRoute: Hashable {
+    case liked
+    case playlist(UUID)
+}
 
-    @State private var showCreatePlaylist = false
+struct HomeView: View {
+    @State private var model = HomeViewModel()
+    @State private var showNewPlaylist = false
     @State private var newPlaylistName = ""
+    @Namespace private var zoom
+
+    private let engine = AudioEngine.shared
+    private let playlists = PlaylistManager.shared
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    // MARK: - Медіатека
+                VStack(alignment: .leading, spacing: 32) {
                     librarySection
 
-                    // MARK: - Нові релізи
-                    if !viewModel.newReleases.isEmpty {
-                        NewReleasesSection(albums: viewModel.newReleases)
-                    }
-
-                    // MARK: - Рекомендації
-                    if !viewModel.recommendations.isEmpty {
-                        recommendationsSection
+                    if model.isLoading && !model.hasContent {
+                        loadingPlaceholder
+                    } else {
+                        if !model.newReleases.isEmpty {
+                            NewReleasesSection(albums: model.newReleases, zoom: zoom)
+                        }
+                        if !model.recommendations.isEmpty {
+                            recommendationsSection
+                        }
                     }
                 }
-                .padding(.top, 4)
-                .padding(.bottom, audioEngine.currentTrack != nil ? 90 : 32)
+                .padding(.vertical, 8)
             }
-            .background(ThemeManager.shared.primaryBackground.ignoresSafeArea())
-            .navigationTitle("Castlie")
-            .alert("Новий плейлист", isPresented: $showCreatePlaylist) {
-                TextField("Назва", text: $newPlaylistName)
-                Button("Створити") {
-                    playlistManager.createPlaylist(name: newPlaylistName)
-                }
-                Button("Скасувати", role: .cancel) {}
-            }
+            .scrollIndicators(.hidden)
+            .background(Theme.background)
+            .navigationTitle("Головна")
+            .refreshable { await model.load() }
             .overlay {
-                if viewModel.isLoading && viewModel.newReleases.isEmpty {
-                    ProgressView()
-                        .tint(ThemeManager.shared.accent)
-                        .scaleEffect(1.2)
-                }
-
-                if let error = viewModel.errorMessage {
+                if let error = model.errorMessage, !model.hasContent, !model.isLoading {
                     ContentUnavailableView {
-                        Label("Немає з'єднання", systemImage: "wifi.exclamationmark")
+                        Label("Не вдалося завантажити", systemImage: "wifi.exclamationmark")
                     } description: {
                         Text(error)
                     } actions: {
-                        Button("Повторити") {
-                            Task { await viewModel.loadContent() }
+                        Button("Спробувати ще раз") {
+                            Task { await model.load() }
                         }
-                        .buttonStyle(.bordered)
-                        .tint(ThemeManager.shared.accent)
+                        .buttonStyle(.glassProminent)
+                        .tint(Theme.accent)
                     }
                 }
             }
             .task {
-                if viewModel.newReleases.isEmpty {
-                    await viewModel.loadContent()
+                if !model.hasContent { await model.load() }
+            }
+            .navigationDestination(for: SpotifyAlbum.self) { album in
+                AlbumDetailView(album: album)
+                    .navigationTransition(.zoom(sourceID: album.id, in: zoom))
+            }
+            .navigationDestination(for: LibraryRoute.self) { route in
+                switch route {
+                case .liked: PlaylistView(source: .liked)
+                case .playlist(let id): PlaylistView(source: .playlist(id))
                 }
+            }
+            .alert("Новий плейлист", isPresented: $showNewPlaylist) {
+                TextField("Назва", text: $newPlaylistName)
+                Button("Створити") { playlists.createPlaylist(name: newPlaylistName) }
+                Button("Скасувати", role: .cancel) {}
             }
         }
     }
 
-    // MARK: - Library Section
+    // MARK: - Library
 
     private var librarySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Медіатека")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundStyle(ThemeManager.shared.primaryText)
+            SectionHeader(title: "Медіатека")
 
-                Spacer()
-
-                Button {
-                    newPlaylistName = ""
-                    showCreatePlaylist = true
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title3)
-                        .foregroundStyle(ThemeManager.shared.accent)
-                }
-            }
-            .padding(.horizontal)
-
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal) {
                 LazyHStack(spacing: 14) {
-                    // Улюблені
-                    NavigationLink {
-                        PlaylistView(
-                            title: "Улюблені",
-                            subtitle: "\(playlistManager.likedTracks.count) треків",
-                            icon: "heart.fill",
-                            tracks: playlistManager.likedTracks
-                        )
-                    } label: {
+                    NavigationLink(value: LibraryRoute.liked) {
                         LibraryCard(
                             title: "Улюблені",
-                            count: playlistManager.likedTracks.count,
-                            icon: "heart.fill",
-                            gradient: [Color(hex: "FF416C"), Color(hex: "FF4B2B")]
+                            subtitle: Format.tracks(playlists.likedTracks.count),
+                            symbol: "heart.fill",
+                            colors: [Color(hex: "FF375F"), Color(hex: "FF6B35")]
                         )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable(scale: 0.96))
 
-                    // Плейлисти
-                    ForEach(playlistManager.playlists) { playlist in
-                        NavigationLink {
-                            PlaylistView(
-                                title: playlist.name,
-                                subtitle: "\(playlist.trackCount) треків",
-                                icon: playlist.customIcon ?? "music.note.list",
-                                tracks: playlist.tracks,
-                                playlistId: playlist.id
-                            )
-                        } label: {
+                    ForEach(playlists.playlists) { playlist in
+                        NavigationLink(value: LibraryRoute.playlist(playlist.id)) {
                             LibraryCard(
                                 title: playlist.name,
-                                count: playlist.trackCount,
-                                icon: playlist.customIcon ?? "music.note.list",
-                                gradient: [ThemeManager.shared.cardBackground, Color(hex: "2E2E3E")]
+                                subtitle: Format.tracks(playlist.trackCount),
+                                symbol: playlist.customIcon ?? "music.note.list",
+                                colors: [Color(hex: "3A3A4E"), Color(hex: "22222E")]
                             )
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.pressable(scale: 0.96))
                     }
+
+                    Button {
+                        newPlaylistName = ""
+                        showNewPlaylist = true
+                    } label: {
+                        LibraryCard(title: "Новий плейлист", subtitle: "Створити", symbol: "plus", colors: [Theme.card, Theme.card])
+                    }
+                    .buttonStyle(.pressable(scale: 0.96))
                 }
-                .padding(.horizontal)
+                .scrollTargetLayout()
+            }
+            .contentMargins(.horizontal, 20, for: .scrollContent)
+            .scrollTargetBehavior(.viewAligned)
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    // MARK: - Recommendations
+
+    private var recommendationsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionHeader(title: "Рекомендації")
+            LazyVStack(spacing: 0) {
+                ForEach(Array(model.recommendations.enumerated()), id: \.element.id) { index, track in
+                    TrackRow(track: track) {
+                        engine.play(tracks: model.recommendations, startIndex: index)
+                    }
+                    .padding(.leading, 20)
+                    .padding(.trailing, 8)
+                }
             }
         }
     }
 
-    // MARK: - Recommendations Section
-
-    private var recommendationsSection: some View {
+    private var loadingPlaceholder: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Рекомендації")
-                .font(.system(size: 22, weight: .bold, design: .rounded))
-                .foregroundStyle(ThemeManager.shared.primaryText)
-                .padding(.horizontal)
-
-            LazyVStack(spacing: 2) {
-                ForEach(Array(viewModel.recommendations.enumerated()), id: \.element.id) { index, track in
-                    SpotifyTrackRow(track: track) {
-                        audioEngine.play(
-                            tracks: viewModel.recommendations,
-                            startIndex: index
-                        )
+            SectionHeader(title: "Нові релізи")
+            HStack(spacing: 14) {
+                ForEach(0..<3, id: \.self) { _ in
+                    VStack(alignment: .leading, spacing: 6) {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Theme.card)
+                            .frame(width: 160, height: 160)
+                        Text("Назва альбому").font(.subheadline)
+                        Text("Виконавець").font(.caption)
                     }
                 }
             }
+            .padding(.horizontal, 20)
+            .redacted(reason: .placeholder)
+            .opacity(0.6)
         }
+        .accessibilityLabel("Завантаження")
     }
 }
 
-// MARK: - Library Card
+struct SectionHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.title2.weight(.bold))
+            .padding(.horizontal, 20)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
 
 private struct LibraryCard: View {
     let title: String
-    let count: Int
-    let icon: String
-    let gradient: [Color]
+    let subtitle: String
+    let symbol: String
+    let colors: [Color]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: gradient,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 140, height: 140)
+                .fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 136, height: 136)
                 .overlay {
-                    Image(systemName: icon)
-                        .font(.system(size: 38, weight: .medium))
-                        .foregroundStyle(.white.opacity(icon == "heart.fill" ? 1 : 0.65))
+                    Image(systemName: symbol)
+                        .font(.system(size: 40, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
                 }
-
             Text(title)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
-                .foregroundStyle(ThemeManager.shared.primaryText)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
                 .lineLimit(1)
-
-            Text("\(count) треків")
-                .font(.system(size: 12, design: .rounded))
-                .foregroundStyle(ThemeManager.shared.secondaryText)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .frame(width: 140)
+        .frame(width: 136, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
 

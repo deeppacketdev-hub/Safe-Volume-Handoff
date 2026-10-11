@@ -16,11 +16,4 @@ struct Playlist: Identifiable, Codable, Hashable, Equatable {
     }
     
     var trackCount: Int { tracks.count }
-    
-    /// Загальна тривалість плейлиста
-    var totalDuration: String {
-        let total = tracks.reduce(0) { $0 + $1.durationSeconds }
-        let minutes = Int(total) / 60
-        return "\(minutes) хв"
-    }
 }

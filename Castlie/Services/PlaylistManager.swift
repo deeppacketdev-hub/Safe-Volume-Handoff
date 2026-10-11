@@ -3,11 +3,11 @@ import Observation
 
 @Observable
 @MainActor
-class PlaylistManager {
+final class PlaylistManager {
     static let shared = PlaylistManager()
     
-    var playlists: [Playlist] = []
-    var likedTracks: [Track] = [] {
+    private(set) var playlists: [Playlist] = []
+    private(set) var likedTracks: [Track] = [] {
         didSet {
             likedTrackIds = Set(likedTracks.map(\.id))
         }
@@ -54,6 +54,14 @@ class PlaylistManager {
         return playlist
     }
     
+    /// Перейменувати плейлист
+    func renamePlaylist(id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let index = playlists.firstIndex(where: { $0.id == id }) else { return }
+        playlists[index].name = trimmed
+        savePlaylists()
+    }
+
     /// Видалити плейлист
     func deletePlaylist(id: UUID) {
         playlists.removeAll(where: { $0.id == id })

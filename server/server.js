@@ -192,7 +192,7 @@ wss.on('connection', (ws, req) => {
             senderName: msg.senderName || 'iPhone',
             track: msg.track,
             targetVolume: msg.targetVolume,
-            fadeInDuration: msg.fadeInDuration || 2.0
+            fadeInDuration: typeof msg.fadeInDuration === 'number' ? msg.fadeInDuration : 2.0
           }));
 
           clientWs.send(JSON.stringify({
@@ -279,7 +279,8 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     if (currentDeviceId && currentRoomId) {
       const room = rooms.get(currentRoomId);
-      if (room) {
+      // Пристрій міг уже перепідключитися з тим самим id — не видаляємо новий запис.
+      if (room && room.get(currentDeviceId)?.ws === ws) {
         room.delete(currentDeviceId);
         broadcastToRoom(currentRoomId, {
           type: 'device_left',
