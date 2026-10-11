@@ -95,7 +95,7 @@
 		F8D1038B1D35F3B76245AE43 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		F90BC9420A2E4A819BDF243F /* PlaylistManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistManager.swift; sourceTree = "<group>"; };
 		F9E9D78936D3252D274F9EA9 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
-		FA134243D22AAE489A9F93AF /* Castlie.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Castlie.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FA134243D22AAE489A9F93AF /* Castlie.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Castlie.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -300,7 +300,6 @@
 				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					105A2592D39FB0859B555CB9 = {
-						DevelopmentTeam = RCB9V8KY57;
 						ProvisioningStyle = Automatic;
 					};
 				};
